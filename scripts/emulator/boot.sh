@@ -8,6 +8,10 @@ API=${API:-34}
 IMG="system-images;android-$API;google_apis;x86_64"
 SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}
 export PATH="$SDK/cmdline-tools/latest/bin:$SDK/emulator:$SDK/platform-tools:$PATH"
+# One explicit place for the AVD, for both avdmanager and the emulator.
+export ANDROID_USER_HOME="$HOME/.android"
+export ANDROID_AVD_HOME="$HOME/.android/avd"
+mkdir -p "$ANDROID_AVD_HOME"
 
 {
   echo "== host"; nproc; free -g; ls -l /dev/kvm
@@ -18,14 +22,21 @@ yes | sdkmanager --licenses > /dev/null 2>&1
 sdkmanager --install "platform-tools" "emulator" "$IMG" > "$OUT/sdkmanager.txt" 2>&1
 emulator -accel-check >> "$OUT/boot-host.txt" 2>&1
 
-echo no | avdmanager create avd -n test -k "$IMG" -d pixel_6 --force >> "$OUT/boot-host.txt" 2>&1
-CFG="$HOME/.android/avd/test.avd/config.ini"
+echo no | avdmanager create avd -n test -k "$IMG" -d pixel_6 -p "$ANDROID_AVD_HOME/test.avd" --force >> "$OUT/boot-host.txt" 2>&1
+CFG="$ANDROID_AVD_HOME/test.avd/config.ini"
+if [ ! -f "$CFG" ]; then
+  echo "AVD was not created" | tee -a "$OUT/boot-host.txt"
+  ls -la "$ANDROID_AVD_HOME" "$HOME/.android" >> "$OUT/boot-host.txt" 2>&1
+  exit 1
+fi
+# The runner has 2 cores and 7 GB: keep the guest small.
 {
-  echo "hw.ramSize=4096"
+  echo "hw.ramSize=3072"
   echo "disk.dataPartition.size=8G"
-  echo "hw.cpu.ncore=3"
+  echo "hw.cpu.ncore=2"
   echo "hw.keyboard=yes"
 } >> "$CFG"
+emulator -list-avds >> "$OUT/boot-host.txt" 2>&1
 
 nohup emulator -avd test -no-window -no-audio -no-boot-anim -no-snapshot \
   -gpu swiftshader_indirect -accel on -camera-back none -camera-front none \
