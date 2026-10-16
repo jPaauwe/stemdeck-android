@@ -63,7 +63,7 @@ class SeparationService : Service() {
             return START_NOT_STICKY
         }
         createChannel()
-        startInForeground(buildNotification("Getting ready…", null))
+        startInForeground(buildNotification("StemDeck", "Getting ready…", null))
         synchronized(lock) {
             if (!running) {
                 running = true

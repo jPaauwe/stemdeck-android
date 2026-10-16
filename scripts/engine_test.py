@@ -26,6 +26,11 @@ os.makedirs(WORK, exist_ok=True)
 SOURCES = ["drums", "bass", "other", "vocals", "guitar", "piano"]
 
 
+def last_json(out):
+    """The engine library logs to stdout; the CLI's JSON result is its last line."""
+    return json.loads([l for l in out.splitlines() if l.startswith("{")][-1])
+
+
 def run(*args):
     print("$", " ".join(args), flush=True)
     r = subprocess.run(args, capture_output=True, text=True)
@@ -86,7 +91,7 @@ x = np.fromfile(prep, np.float32).reshape(-1, 2)
 expected = int(len(x48) * 44100 / 48000)
 assert abs(len(x) - expected) <= 1, (len(x), expected)
 
-stats = json.loads(run(CLI, "analyze", prep))
+stats = last_json(run(CLI, "analyze", prep))
 ref_lufs = pyloudnorm.Meter(44100).integrated_loudness(x.mean(axis=1).astype(np.float64))
 print(f"LUFS engine {stats['lufs']:.2f}  pyloudnorm {ref_lufs:.2f}")
 assert abs(stats["lufs"] - ref_lufs) < 0.5
@@ -96,7 +101,7 @@ for label, threads, chunk in [("chunked", "3", "10"), ("single", "1", "1000")]:
     out = os.path.join(WORK, label)
     os.makedirs(out, exist_ok=True)
     before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    res = json.loads(run(CLI, "separate", MODEL, prep, out, threads, chunk))
+    res = last_json(run(CLI, "separate", MODEL, prep, out, threads, chunk))
     rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     print(f"{label}: {res['seconds']} s, peak RSS {rss / 1024:.0f} MB (prev {before / 1024:.0f} MB)")
     results[label] = {s: read_wav16(os.path.join(out, f"{s}.wav")) for s in SOURCES}

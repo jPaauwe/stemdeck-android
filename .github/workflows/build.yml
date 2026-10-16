@@ -73,12 +73,18 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
-      - name: Signing key from secrets (optional)
+      - name: Signing key
         env:
           KS: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
-        if: env.KS != ''
         run: |
-          echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+          else
+            echo "::warning::SIGNING_KEYSTORE_BASE64 is not set; this APK is signed with a throwaway key and will not install over other builds."
+            keytool -genkeypair -keystore "$RUNNER_TEMP/release.jks" -storetype PKCS12 \
+              -storepass stemdeck-sideload -keypass stemdeck-sideload -alias sideload \
+              -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=throwaway"
+          fi
           echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
       - name: Build
         env:
