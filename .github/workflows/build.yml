@@ -115,7 +115,7 @@ jobs:
     name: Run in the emulator
     needs: apk
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -133,7 +133,7 @@ jobs:
       - name: Drive the app
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           target: google_apis
           arch: x86_64
           ram-size: 6144M
@@ -141,6 +141,7 @@ jobs:
           cores: 4
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
+          emulator-boot-timeout: 1500
           script: bash scripts/emulator/run.sh
       - name: Publish logs to a ci-logs branch
         if: always()
