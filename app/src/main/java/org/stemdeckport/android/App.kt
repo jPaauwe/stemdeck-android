@@ -23,6 +23,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        Diagnostics.install(this)
         // App-specific external storage: stems stay reachable over USB
         // (Android/data/org.stemdeckport.android/files/jobs) and are removed
         // with the app.
@@ -40,10 +41,10 @@ class App : Application() {
         val mi = ActivityManager.MemoryInfo()
         (getSystemService(ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(mi)
         val gb = mi.totalMem / 1e9
+        // ~0.8 GB per worker for 24 s chunks, plus ~0.3 GB for the model.
         val byMemory = when {
-            gb >= 11 -> 4
-            gb >= 7 -> 3
-            gb >= 5 -> 2
+            gb >= 11 -> 3
+            gb >= 7 -> 2
             else -> 1
         }
         return minOf(byMemory, maxOf(1, Runtime.getRuntime().availableProcessors() / 2))

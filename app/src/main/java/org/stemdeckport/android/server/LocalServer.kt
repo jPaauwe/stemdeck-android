@@ -96,6 +96,9 @@ class LocalServer(
         val parts = s.uri.removePrefix("/api/").trimEnd('/').split('/')
         val method = s.method
         if (parts[0] == "config") return json(200, JSONObject().put("platform", "android"))
+        if (parts[0] == "diagnostics") {
+            return text(200, org.stemdeckport.android.Diagnostics.lastReport() ?: "No crash recorded.")
+        }
         if (parts[0] != "jobs") return json(404, detail("not found"))
 
         if (parts.size == 1) {

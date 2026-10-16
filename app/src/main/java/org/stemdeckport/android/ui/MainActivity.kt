@@ -27,6 +27,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import org.stemdeckport.android.App
 import org.stemdeckport.android.BuildConfig
+import org.stemdeckport.android.Diagnostics
 import org.stemdeckport.android.data.Mixdown
 import org.stemdeckport.android.engine.NativeEngine
 import org.stemdeckport.android.server.LocalServer
@@ -125,8 +126,29 @@ class MainActivity : ComponentActivity() {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        // Anything queued before the app was last closed.
-        if (app.store.hasQueued()) SeparationService.start(this)
+        // Anything queued before the app was last closed, unless the last run
+        // crashed: then wait for the next import, so a crash in the service
+        // itself cannot keep the app from opening.
+        if (app.store.hasQueued() && Diagnostics.lastReport() == null) SeparationService.start(this)
+
+        if (savedInstanceState == null) showLastExitReport()
+    }
+
+    /** If the app stopped unexpectedly last time, say why and offer the details. */
+    private fun showLastExitReport() {
+        val report = Diagnostics.lastReport() ?: return
+        val summary = report.lineSequence().take(4).joinToString("\n")
+        android.app.AlertDialog.Builder(this)
+            .setTitle("StemDeck stopped unexpectedly last time")
+            .setMessage("$summary\n\nCopy the details and send them to whoever is fixing this.")
+            .setPositiveButton("Copy details") { _, _ ->
+                val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("StemDeck crash report", report))
+                Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+                Diagnostics.clear()
+            }
+            .setNegativeButton("Dismiss") { _, _ -> Diagnostics.clear() }
+            .show()
     }
 
     override fun onNewIntent(intent: Intent) {

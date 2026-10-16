@@ -42,16 +42,21 @@ class JobStore(val root: File) {
                     dir.deleteRecursively()
                     return@forEach
                 }
-                // A job the app was killed in the middle of goes back in the
-                // queue if its input is still there.
-                if (!job.finished) {
-                    val hasInput = workDir(job.id).listFiles()?.any { it.name.startsWith("input") } == true
-                    if (hasInput && job.trashedAt == null) {
-                        job.status = "queued"; job.progress = 0.0; job.stage = "Queued"
-                    } else {
-                        job.status = "error"; job.error = "Interrupted. Import the file again."
-                        job.stage = "Failed"
-                    }
+                // A job that never started stays queued. One that was being
+                // separated when the process died is not retried: if the
+                // separation itself killed the app (a crash, or Android
+                // reclaiming its memory), retrying it on every launch would
+                // stop the app from opening at all.
+                if (!job.finished && job.status != "queued") {
+                    job.status = "error"
+                    job.stage = "Failed"
+                    job.error = "StemDeck stopped while separating this song (it may have run out of memory). Import it again to retry."
+                    workDir(job.id).deleteRecursively()
+                    stemsDir(job.id).listFiles()?.forEach { it.delete() }
+                    persist(job)
+                } else if (job.status == "queued" && inputFile(job.id) == null) {
+                    job.status = "error"; job.stage = "Failed"
+                    job.error = "The imported file is missing. Import it again."
                     persist(job)
                 }
                 jobs[job.id] = job
