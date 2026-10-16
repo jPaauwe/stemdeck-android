@@ -63,7 +63,20 @@ class SeparationService : Service() {
             return START_NOT_STICKY
         }
         createChannel()
-        startInForeground(buildNotification("StemDeck", "Getting ready…", null))
+        if (!startInForeground(buildNotification("StemDeck", "Getting ready…", null))) {
+            // Android refused to run the service. Fail the queued songs with a
+            // message instead of crashing, so the app still opens.
+            while (true) {
+                val job = app.store.nextQueued() ?: break
+                app.store.update(job.id) {
+                    it.status = "error"
+                    it.stage = "Failed"
+                    it.error = "Android did not allow StemDeck to separate in the background."
+                }
+            }
+            stopSelf()
+            return START_NOT_STICKY
+        }
         synchronized(lock) {
             if (!running) {
                 running = true
@@ -73,13 +86,27 @@ class SeparationService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startInForeground(n: Notification) {
-        val type = if (Build.VERSION.SDK_INT >= 35) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
+    /**
+     * Calls the framework directly: androidx ServiceCompat masks out service
+     * types newer than the ones it knows, which turned mediaProcessing into
+     * "none" and made Android 15+ kill the app. Falls back to dataSync if
+     * mediaProcessing is refused. Returns false if Android refuses both.
+     */
+    private fun startInForeground(n: Notification): Boolean {
+        val types = if (Build.VERSION.SDK_INT >= 35) {
+            listOf(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            listOf(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         }
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, n, type)
+        for (type in types) {
+            try {
+                startForeground(NOTIFICATION_ID, n, type)
+                return true
+            } catch (e: Exception) {
+                Log.w(TAG, "startForeground with type $type refused", e)
+            }
+        }
+        return false
     }
 
     private fun runQueue() {
