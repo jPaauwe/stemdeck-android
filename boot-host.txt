@@ -1,0 +1,14 @@
+== host
+2
+               total        used        free      shared  buff/cache   available
+Mem:               7           1           3           0           3           6
+Swap:              2           0           2
+crw-rw-rw- 1 root kvm 10, 232 Oct 16 17:22 /dev/kvm
+== sdk /usr/local/lib/android/sdk
+accel:
+0
+KVM (version 12) is installed and usable.
+accel
+Loading local repository...                                                     [=========                              ] 25% Loading local repository...       [=========                              ] 25% Fetch remote repository...        [=======================================] 100% Fetch remote repository...       
+Auto-selecting single ABI x86_64
+test
