@@ -7,7 +7,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Eigen is a git submodule pinned to the commit demucs.cpp was written
 # against (see third_party/README.md).
-set(EIGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen")
+set(EIGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen" CACHE PATH "Eigen source tree")
 if(NOT EXISTS "${EIGEN_DIR}/Eigen/Dense")
   message(FATAL_ERROR "Eigen not found at ${EIGEN_DIR}. Run: git submodule update --init")
 endif()

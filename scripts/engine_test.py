@@ -14,7 +14,6 @@ usage: engine_test.py <sdengine_cli> <model.bin> <workdir>
 """
 import json
 import os
-import resource
 import subprocess
 import sys
 
@@ -100,10 +99,12 @@ results = {}
 for label, threads, chunk in [("chunked", "3", "10"), ("single", "1", "1000")]:
     out = os.path.join(WORK, label)
     os.makedirs(out, exist_ok=True)
-    before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    res = last_json(run(CLI, "separate", MODEL, prep, out, threads, chunk))
-    rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    print(f"{label}: {res['seconds']} s, peak RSS {rss / 1024:.0f} MB (prev {before / 1024:.0f} MB)")
+    rss_file = os.path.join(WORK, f"{label}.rss")
+    res = last_json(run("/usr/bin/time", "-f", "%M", "-o", rss_file, CLI, "separate", MODEL, prep, out, threads, chunk))
+    rss_mb = int(open(rss_file).read().split()[-1]) / 1024
+    audio_s = len(x) / 44100
+    print(f"{label}: {threads} thread(s), {res['seconds']} s for {audio_s:.0f} s of audio "
+          f"({res['seconds'] / audio_s:.1f}x real time), peak RSS {rss_mb:.0f} MB")
     results[label] = {s: read_wav16(os.path.join(out, f"{s}.wav")) for s in SOURCES}
     for s in SOURCES:
         assert len(results[label][s]) == len(x), (s, len(results[label][s]), len(x))
@@ -112,13 +113,14 @@ total = sum(results["chunked"].values())
 print(f"stems sum vs mix SNR: {snr(x, total):.1f} dB")
 assert snr(x, total) > 10
 
+# Two runs differ a little even unchunked (Demucs shifts each run by a random
+# offset), so the difference is measured against the mix, not the stem: a
+# quiet stem's own SNR says little about whether the chunk joins are clean.
+mix_power = np.sum(x ** 2)
 for s in SOURCES:
     a, b = results["single"][s], results["chunked"][s]
-    energy = 10 * np.log10(np.mean(a ** 2) + 1e-12)
-    if energy < -45:
-        print(f"  {s:7s} near-silent ({energy:.0f} dB), skipped")
-        continue
-    v = snr(a, b)
-    print(f"  {s:7s} chunked vs single: {v:.1f} dB (level {energy:.0f} dB)")
-    assert v > 12, s
+    level = 10 * np.log10(np.mean(a ** 2) + 1e-12)
+    err = 10 * np.log10(mix_power / max(np.sum((a - b) ** 2), 1e-12))
+    print(f"  {s:7s} chunked vs single: difference {err:.1f} dB below the mix (stem level {level:.0f} dB)")
+    assert err > 20, s
 print("engine OK")

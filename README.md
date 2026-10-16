@@ -70,8 +70,11 @@ installs them on first sync).
   Apache License 2.0, © the StemDeck contributors. See
   `app/src/main/assets/web/LICENSE-StemDeck.txt`; the upstream commit is in
   `UPSTREAM_COMMIT` next to it.
-- demucs.cpp: MIT, © Sevag H (`app/src/main/cpp/demucs/LICENSE`). One
-  addition, `demucs_inference_normalized`, is marked in `model_apply.cpp`.
+- demucs.cpp: MIT, © Sevag H (`app/src/main/cpp/demucs/LICENSE`). Changed
+  here: `demucs_inference_normalized` in `model_apply.cpp`, and the
+  transposed and stride-1 convolutions in `conv.hpp`, rewritten to need about
+  a third of the memory per inference thread (same results to float
+  rounding). Each change is marked "StemDeck Android".
 - Demucs and the `htdemucs_6s` weights: MIT, © Meta Platforms.
 - Eigen: MPL 2.0. NanoHTTPD: BSD 3-Clause.
 - The SoundTouch-based and Signalsmith Stretch worklets in
