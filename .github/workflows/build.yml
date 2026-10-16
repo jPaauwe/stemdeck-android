@@ -1,0 +1,103 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MODEL_URL: https://huggingface.co/datasets/Retrobear/demucs.cpp/resolve/8f58ac0491bbea657275bcd3e38af1ab3a27bfc9/ggml-model-htdemucs-6s-f16.bin
+  MODEL_SHA256: 09704f4ceae204e56e77d5eefd6ac71d7275be81fd507e6913371d59abcee856
+
+jobs:
+  engine:
+    name: Separation engine (real model)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Build the engine for the CI host
+        run: |
+          cmake -S app/src/main/cpp -B build/engine -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/engine -j"$(nproc)"
+      - name: Cache the model
+        uses: actions/cache@v4
+        with:
+          path: model
+          key: model-${{ env.MODEL_SHA256 }}
+      - name: Download and verify the model
+        run: |
+          mkdir -p model
+          if [ ! -f model/htdemucs-6s.bin ]; then
+            curl -fsSL --retry 3 -o model/htdemucs-6s.bin "$MODEL_URL"
+          fi
+          actual=$(sha256sum model/htdemucs-6s.bin | cut -d' ' -f1)
+          echo "sha256: $actual"
+          if [ "$actual" != "$MODEL_SHA256" ]; then
+            echo "::error::model checksum mismatch (got $actual)"; rm -f model/htdemucs-6s.bin; exit 1
+          fi
+      - name: Test the engine
+        run: |
+          pip install --quiet numpy pyloudnorm
+          python3 scripts/engine_test.py build/engine/sdengine_cli model/htdemucs-6s.bin build/engine-test
+
+  apk:
+    name: APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Signing key from secrets (optional)
+        env:
+          KS: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        if: env.KS != ''
+        run: |
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: Build
+        env:
+          SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease
+      - name: Rename
+        run: cp app/build/outputs/apk/release/app-release.apk StemDeck-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StemDeck-Android
+          path: StemDeck-Android.apk
+
+  release:
+    name: Publish the APK
+    needs: [engine, apk]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: StemDeck-Android
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="build-${{ github.run_number }}"
+          gh release create "$tag" StemDeck-Android.apk \
+            --repo "${{ github.repository }}" \
+            --title "StemDeck for Android, build ${{ github.run_number }}" \
+            --notes "Built from ${{ github.sha }}. Open this page on your phone and tap StemDeck-Android.apk to install." \
+            --latest

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">StemDeck</string>
+    <string name="share_label">Split into stems</string>
+    <string name="cancel">Cancel</string>
+    <string name="channel_separation">Separating stems</string>
+</resources>
