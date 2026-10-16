@@ -48,7 +48,18 @@ jobs:
       - name: Test the engine
         run: |
           pip install --quiet numpy pyloudnorm
-          python3 scripts/engine_test.py build/engine/sdengine_cli model/htdemucs-6s.bin build/engine-test
+          set -o pipefail
+          python3 scripts/engine_test.py build/engine/sdengine_cli model/htdemucs-6s.bin build/engine-test 2>&1 | tee engine-test.log
+      - name: Publish logs to a ci-logs branch
+        if: always()
+        run: |
+          mkdir -p /tmp/ci-logs
+          cp -f *.log /tmp/ci-logs/ 2>/dev/null || true
+          cd /tmp/ci-logs
+          echo "run ${{ github.run_id }} job ${{ github.job }} sha ${{ github.sha }}" > INFO.txt
+          git init -q -b logs && git add -A
+          git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs ${{ github.run_id }} ${{ github.job }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" logs:refs/heads/ci-logs/${{ github.job }}
 
   apk:
     name: APK
@@ -74,7 +85,19 @@ jobs:
           SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleRelease
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon assembleRelease 2>&1 | tee gradle.log
+      - name: Publish logs to a ci-logs branch
+        if: always()
+        run: |
+          mkdir -p /tmp/ci-logs
+          cp -f *.log /tmp/ci-logs/ 2>/dev/null || true
+          cd /tmp/ci-logs
+          echo "run ${{ github.run_id }} job ${{ github.job }} sha ${{ github.sha }}" > INFO.txt
+          git init -q -b logs && git add -A
+          git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs ${{ github.run_id }} ${{ github.job }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" logs:refs/heads/ci-logs/${{ github.job }}
       - name: Rename
         run: cp app/build/outputs/apk/release/app-release.apk StemDeck-Android.apk
       - uses: actions/upload-artifact@v4
