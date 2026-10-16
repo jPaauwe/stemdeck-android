@@ -130,19 +130,10 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
           pip install --quiet numpy
+      - name: Boot the emulator
+        run: bash scripts/emulator/boot.sh
       - name: Drive the app
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: google_apis
-          arch: x86_64
-          ram-size: 6144M
-          disk-size: 8G
-          cores: 4
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          disable-animations: true
-          emulator-boot-timeout: 1500
-          script: bash scripts/emulator/run.sh
+        run: bash scripts/emulator/run.sh
       - name: Publish logs to a ci-logs branch
         if: always()
         run: |
