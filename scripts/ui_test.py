@@ -143,7 +143,7 @@ class Api(BaseHTTPRequestHandler):
         if path.endswith("/"):
             f = f / "index.html"
         if WEB in f.parents and f.is_file():
-            ct = {"html": "text/html", "js": "text/javascript", "css": "text/css", "json": "application/json"}.get(f.suffix[1:], "application/octet-stream")
+            ct = {"html": "text/html", "js": "text/javascript", "css": "text/css", "json": "application/json", "ttf": "font/ttf"}.get(f.suffix[1:], "application/octet-stream")
             return self.send(200, f.read_bytes(), ct)
         self.send(404, b"not found", "text/plain")
 
@@ -174,6 +174,8 @@ def main() -> int:
             page = browser.new_page(viewport={"width": 384, "height": h}, device_scale_factor=2)
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
+            outside: list[str] = []  # the app promises to contact nobody unasked
+            page.on("request", lambda r: outside.append(r.url) if not r.url.startswith(base) and not r.url.startswith("data:") else None)
             # Count the clicks the scheduler makes (one oscillator each).
             page.add_init_script("""
               window.__osc = 0;
@@ -194,6 +196,7 @@ def main() -> int:
                 page.screenshot(path=str(shots / f"mixer-{h}.png"), full_page=True)
             # Click on, then play: the scheduler makes oscillators.
             page.click("[data-action='click-toggle']")
+            page.wait_for_timeout(300)
             check(page.get_attribute("[data-action='click-toggle']", "aria-pressed") == "true", f"{h}: click toggles on")
             check(any(x.get("click", {}).get("on") is True for x in Api.puts), f"{h}: click setting saved to the app")
             page.click(".t-play")
@@ -201,6 +204,7 @@ def main() -> int:
             n1 = page.evaluate("window.__osc")
             check(n1 >= 2, f"{h}: clicks scheduled while playing ({n1})")
             page.select_option("[data-click-accent]", "3")
+            page.wait_for_timeout(300)  # the save is a fetch
             check(any(x.get("click", {}).get("accent") == 3 for x in Api.puts), f"{h}: accent saved")
             page.click("[data-action='click-mult'][data-mult='2']")
             check(page.get_attribute("[data-action='click-mult'][data-mult='2']", "aria-checked") == "true", f"{h}: double time selected")
@@ -248,6 +252,7 @@ def main() -> int:
             if shots:
                 page.screenshot(path=str(shots / f"extract-{h}.png"), full_page=False)
             check(not errors, f"{h}: no script errors {errors}")
+            check(not outside, f"{h}: no requests leave the phone {outside[:3]}")
             page.close()
         browser.close()
     server.shutdown()

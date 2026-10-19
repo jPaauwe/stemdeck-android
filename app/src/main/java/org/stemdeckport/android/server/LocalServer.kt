@@ -360,6 +360,7 @@ class LocalServer(
             "svg" -> "image/svg+xml"
             "png" -> "image/png"
             "wasm" -> "application/wasm"
+            "ttf" -> "font/ttf"
             "txt" -> "text/plain; charset=utf-8"
             else -> "application/octet-stream"
         }

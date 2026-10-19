@@ -1,0 +1,15 @@
+/* Android: the UI's two fonts, bundled instead of loaded from Google Fonts,
+   so opening the app contacts nobody. Both SIL Open Font License 1.1
+   (OFL-*.txt), from github.com/google/fonts (ofl/spacegrotesk, ofl/jetbrainsmono). */
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("/fonts/SpaceGrotesk-wght.ttf") format("truetype");
+  font-weight: 300 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-wght.ttf") format("truetype");
+  font-weight: 100 800;
+  font-display: swap;
+}
