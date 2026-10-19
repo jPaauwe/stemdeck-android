@@ -105,11 +105,13 @@ Java_org_stemdeckport_android_engine_NativeEngine_nativeAnalyze(JNIEnv *env, jcl
 extern "C" JNIEXPORT jdoubleArray JNICALL
 Java_org_stemdeckport_android_engine_NativeEngine_nativeSeparate(
     JNIEnv *env, jclass, jstring prepared, jstring outDir, jbooleanArray write,
-    jint threads, jint chunkSeconds, jobject listener)
+    jint threads, jint chunkSeconds, jint computeThreads, jboolean gpu, jobject listener)
 {
     sdengine::SeparateOptions opts;
     opts.threads = threads;
     opts.chunkSeconds = chunkSeconds;
+    opts.computeThreads = computeThreads;
+    opts.gpu = gpu == JNI_TRUE;
     if (write && env->GetArrayLength(write) == sdengine::kNumSources)
     {
         jboolean w[sdengine::kNumSources];
@@ -134,6 +136,17 @@ Java_org_stemdeckport_android_engine_NativeEngine_nativeSeparate(
     jdoubleArray arr = env->NewDoubleArray(sdengine::kNumSources);
     env->SetDoubleArrayRegion(arr, 0, sdengine::kNumSources, r.rms.data());
     return arr;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_stemdeckport_android_engine_NativeEngine_nativeComputeInfo(JNIEnv *env, jclass,
+                                                                    jint computeThreads,
+                                                                    jboolean gpu)
+{
+    sdengine::SeparateOptions opts;
+    opts.computeThreads = computeThreads;
+    opts.gpu = gpu == JNI_TRUE;
+    return env->NewStringUTF(sdengine::compute_info(opts).c_str());
 }
 
 extern "C" JNIEXPORT void JNICALL

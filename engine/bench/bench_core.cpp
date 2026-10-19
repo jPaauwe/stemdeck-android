@@ -6,6 +6,12 @@
 #if __has_include("sdprof.hpp")
 #include "sdprof.hpp"
 #endif
+#if __has_include("gpu.hpp")
+#include "gpu.hpp"
+#define SDB_CLEAR_GPU() sdgpu::clear_weights()
+#else
+#define SDB_CLEAR_GPU()
+#endif
 
 #include <chrono>
 #include <cmath>
@@ -90,11 +96,16 @@ std::string load_model(const std::string &path)
         return "could not load the model";
     if (m->is_4sources)
         return "not the 6-source model";
+    SDB_CLEAR_GPU(); // weights of an earlier model may sit at the same address
     g_model = std::move(m);
     return "";
 }
 
-void free_model() { g_model.reset(); }
+void free_model()
+{
+    SDB_CLEAR_GPU();
+    g_model.reset();
+}
 
 std::string profile_segment(const std::string &outPath)
 {

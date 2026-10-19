@@ -38,8 +38,9 @@ class App : Application() {
     }
 
     /**
-     * How many chunks to separate at once. Each worker holds its own
-     * inference buffers, so this is bounded by memory more than by cores.
+     * How many segments to separate at once. Each holds its own inference
+     * buffers, so this is bounded by memory; the maths inside them is
+     * spread over every core (and the GPU) regardless.
      */
     fun separationThreads(): Int {
         val mi = ActivityManager.MemoryInfo()
@@ -51,7 +52,7 @@ class App : Application() {
             gb >= 7 -> 2
             else -> 1
         }
-        return minOf(byMemory, maxOf(1, Runtime.getRuntime().availableProcessors() / 2))
+        return minOf(byMemory, maxOf(1, Runtime.getRuntime().availableProcessors()))
     }
 
     companion object {

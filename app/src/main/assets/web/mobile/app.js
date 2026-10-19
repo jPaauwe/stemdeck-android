@@ -87,11 +87,16 @@ const STEM_FORMATS = [
   { id: "mp3", name: "MP3", note: "320 kbps · 2.4 MB a minute" },
   { id: "wav", name: "WAV", note: "Lossless · 10 MB a minute" },
 ];
+// Android: where the separation runs. The GPU is used when it works;
+// the engine falls back to the CPU on its own.
+const PROCESSORS = [
+  { id: "gpu", name: "GPU + CPU", note: "Every core plus the GPU" },
+  { id: "cpu", name: "CPU only", note: "Every core" },
+];
 fetch("/api/settings").then((r) => r.json()).then((s) => {
-  if (s && (s.stem_format === "mp3" || s.stem_format === "wav")) {
-    state.stemFormat = s.stem_format;
-    if (state.tab === "extract") render();
-  }
+  if (s && (s.stem_format === "mp3" || s.stem_format === "wav")) state.stemFormat = s.stem_format;
+  if (s && typeof s.gpu === "boolean") state.processor = s.gpu ? "gpu" : "cpu";
+  if (state.tab === "extract") render();
 }).catch(() => {});
 
 const state = {
@@ -106,6 +111,7 @@ const state = {
   pitch: 0, // global transpose in semitones, -6..+6
   selected: { vocals: true, drums: true, bass: true, guitar: true, piano: true, other: true },
   stemFormat: "mp3", // Android: "mp3" (320 kbps) or "wav"; loaded from /api/settings
+  processor: "gpu", // Android: "gpu" or "cpu"; loaded from /api/settings
   quality: "High",
   filter: "All",
   // Library data from /api/jobs. libState: "loading" | "ready" | "empty" | "error".
@@ -651,6 +657,11 @@ function extractScreen() {
         const on = state.stemFormat === f.id;
         return `<button class="chip-btn ${on ? "on" : ""}" style="${on ? "border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.06);" : ""}" data-action="format" data-id="${f.id}"><span class="nm">${f.name}<br><span style="font-size:11.5px;font-weight:500;color:var(--muted)">${f.note}</span></span>${on ? ICON.check : ""}</button>`;
       }).join("")}</div>
+      <div class="eyebrow">PROCESSING</div>
+      <div class="chips">${PROCESSORS.map((f) => {
+        const on = state.processor === f.id;
+        return `<button class="chip-btn ${on ? "on" : ""}" style="${on ? "border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.06);" : ""}" data-action="processor" data-id="${f.id}"><span class="nm">${f.name}<br><span style="font-size:11.5px;font-weight:500;color:var(--muted)">${f.note}</span></span>${on ? ICON.check : ""}</button>`;
+      }).join("")}</div>
       <button class="cta" style="margin-top:22px" data-action="split">${ICON.scissors}Extract stems</button>
       ${extractProgressCard()}
     </div>
@@ -1046,6 +1057,11 @@ app.addEventListener("click", (e) => {
     case "solo":
       state.solo[t.dataset.id] = !state.solo[t.dataset.id];
       applyMix();
+      break;
+    case "processor": // Android
+      state.processor = t.dataset.id;
+      fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gpu: state.processor === "gpu" }) })
+        .catch(() => toast("Couldn't save the setting."));
       break;
     case "format": // Android
       state.stemFormat = t.dataset.id;

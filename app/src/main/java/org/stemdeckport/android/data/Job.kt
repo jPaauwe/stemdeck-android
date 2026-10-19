@@ -30,6 +30,8 @@ class Job(
     var computeSeconds: Double? = null
     /** File type of the stems: "mp3" or "wav". Songs from before MP3 support are "wav". */
     var format: String = "wav"
+    /** What it was separated on, e.g. "10 cores, GPU: …". */
+    var computeDevice: String = "phone"
 
     /** Bumped on every change; the SSE stream sends a frame when it moves. */
     @Volatile var version: Long = 0
@@ -63,7 +65,7 @@ class Job(
         put("has_video", false)
         put("has_lyrics", false)
         put("error", error ?: JSONObject.NULL)
-        put("compute_device", "phone")
+        put("compute_device", computeDevice)
         put("trashed_at", trashedAt ?: JSONObject.NULL)
         put("favorite", favorite)
         put("created_at", createdAt)
@@ -102,6 +104,7 @@ class Job(
             job.trashedAt = optD("trashed_at")
             job.computeSeconds = optD("compute_seconds")
             job.format = o.optString("stem_format", "wav").takeIf { it == "mp3" } ?: "wav"
+            job.computeDevice = o.optString("compute_device", "phone")
             return job
         }
     }

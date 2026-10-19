@@ -1,6 +1,7 @@
 #ifndef LAYERS_HPP
 #define LAYERS_HPP
 
+#include "pool.hpp"
 #include "conv.hpp"
 #include "model.hpp"
 #include "tensor.hpp"
@@ -16,6 +17,12 @@ namespace demucscpp
 void apply_dconv(const struct demucscpp::demucs_model &model,
                  Eigen::Tensor3dXf &y, int freq_idx, int encdec_idx,
                  int layer_idx, int mid_crop);
+
+// StemDeck Android: multi-head attention, out (T x C) = softmax(Qs K^T) V
+// per head; Qs (T x C) already scaled, K and V (S x C). GPU or all cores.
+void attention_heads(const Eigen::MatrixXf &Qs, const Eigen::MatrixXf &K,
+                     const Eigen::MatrixXf &V, int num_heads,
+                     Eigen::MatrixXf &out);
 
 // used for implementing both self-attention and cross-attention
 // let's not modify the second argument
@@ -57,12 +64,24 @@ inline Eigen::Tensor3dXf gelu(const Eigen::Tensor3dXf &x)
         { return 0.5f * a * (1.0f + std::erf(a / std::sqrt(2.0f))); });
 }
 
+// StemDeck Android: the same GELU, in chunks over every core.
 inline Eigen::MatrixXf gelu(const Eigen::MatrixXf &x)
 {
     SD_PROF("gelu");
-    return x.unaryExpr(
-        [](float a)
-        { return 0.5f * a * (1.0f + std::erf(a / std::sqrt(2.0f))); });
+    Eigen::MatrixXf y(x.rows(), x.cols());
+    const Eigen::Index n = x.size();
+    const Eigen::Index chunk = 1 << 16;
+    const float *xp = x.data();
+    float *yp = y.data();
+    sdpool::parallel_for(static_cast<int>((n + chunk - 1) / chunk), [&](int t) {
+        const Eigen::Index i1 = std::min(n, (t + 1) * chunk);
+        for (Eigen::Index i = t * chunk; i < i1; ++i)
+        {
+            const float a = xp[i];
+            yp[i] = 0.5f * a * (1.0f + std::erf(a / std::sqrt(2.0f)));
+        }
+    });
+    return y;
 }
 
 inline Eigen::Tensor3dXf layer_scale(const Eigen::Tensor3dXf &x,

@@ -34,13 +34,13 @@ import kotlin.math.roundToInt
 /**
  * StemDeck Bench: measures the separation engine on this phone.
  *
- *  1. One 7.8 s segment on one thread with each engine (the original
- *     demucs.cpp, builds 4–10 and the app's engine): time, where it goes in
- *     the app's engine (per stage and per operation), and whether each
- *     engine's output matches the original's.
- *  2. A whole test song through each engine's real separation path, the
- *     app's engine at several thread counts: time, real-time factor and
- *     peak memory.
+ *  1. One 7.8 s segment with each engine (the original demucs.cpp and
+ *     builds 4–10 on one thread; the app's engine on one core, on every
+ *     core, and on every core plus the GPU): time, where it goes, and
+ *     whether each output matches the original's.
+ *  2. A whole test song through the real separation path, the app's engine
+ *     with several segments at once, CPU only and with the GPU: time,
+ *     real-time factor and peak memory.
  */
 class BenchActivity : Activity() {
     private lateinit var log: TextView
@@ -82,9 +82,9 @@ class BenchActivity : Activity() {
         root.addView(row1)
 
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        row2.addView(label("Threads: "))
-        for (t in listOf(1, 2, 3, 4, 6)) {
-            val cb = CheckBox(this).apply { text = "$t"; setTextColor(fg); isChecked = t in setOf(1, 2, 4) }
+        row2.addView(label("Segments at once: "))
+        for (t in listOf(1, 2, 3, 4)) {
+            val cb = CheckBox(this).apply { text = "$t"; setTextColor(fg); isChecked = t in setOf(1, 2, 3) }
             threadBoxes[t] = cb
             row2.addView(cb)
         }
@@ -224,67 +224,87 @@ class BenchActivity : Activity() {
         }.absolutePath
         val work = File(filesDir, "bench").apply { deleteRecursively(); mkdirs() }
 
-        // 1. One segment, one thread, every engine.
-        val engines = listOf<EngineNative>(OrigNative, BaseNative, OptNative)
-        out("\n1. One 7.8 s segment, 1 thread (2 rounds each, best kept)")
+        // How the app's engine is set up for each run: threads doing maths
+        // (0 = all cores) and the GPU. The other two engines have no such
+        // settings and run on one thread.
+        data class Variant(val key: String, val label: String, val eng: EngineNative, val threads: Int, val gpu: Boolean)
+        fun EngineNative.plain(label: String = this.label) = Variant(key, label, this, 1, false)
+        fun setup(v: Variant): String = if (v.eng === OptNative) OptNative.nSetCompute(v.threads, v.gpu) else "1 core"
+
+        val gpuInfo = OptNative.nSetCompute(0, true)
+        val hasGpu = gpuInfo.contains("GPU: ")
+        out("\nApp engine: $gpuInfo")
+        val app1 = Variant("app1", "app engine, 1 core", OptNative, 1, false)
+        val appAll = Variant("appall", "app engine, all cores", OptNative, 0, false)
+        val appGpu = Variant("appgpu", "app engine, cores + GPU", OptNative, 0, true)
+        val segVariants = listOf(OrigNative.plain(), BaseNative.plain(), app1, appAll) + if (hasGpu) listOf(appGpu) else emptyList()
+
+        // 1. One segment, every engine and setup.
+        out("\n1. One 7.8 s segment (2 rounds each, best kept)")
         val results = mutableMapOf<String, JSONObject>()
         for (round in 1..2) {
-            for (eng in engines) {
+            for (v in segVariants) {
+                setup(v)
                 val t0 = SystemClock.elapsedRealtime()
-                val err = eng.load(model)
-                if (err.isNotEmpty()) throw IllegalStateException("${eng.label}: $err")
+                val err = v.eng.load(model)
+                if (err.isNotEmpty()) throw IllegalStateException("${v.label}: $err")
                 val loadMs = SystemClock.elapsedRealtime() - t0
-                val outFile = File(work, "seg-${eng.key}.f32").path
-                val js = JSONObject(eng.profile(outFile))
-                eng.free()
-                if (js.has("error")) throw IllegalStateException("${eng.label}: ${js.getString("error")}")
+                val js = JSONObject(v.eng.profile(File(work, "seg-${v.key}.f32").path))
+                v.eng.free()
+                if (js.has("error")) throw IllegalStateException("${v.label}: ${js.getString("error")}")
                 val ms = js.getDouble("ms")
-                out("  round $round %-22s %6.2f s   (model load %.1f s, thermal %s)".format(eng.label, ms / 1000, loadMs / 1000.0, thermal()))
-                val prev = results[eng.key]
-                if (prev == null || ms < prev.getDouble("ms")) results[eng.key] = js
+                out("  round $round %-26s %6.2f s   (model load %.1f s, thermal %s)".format(v.label, ms / 1000, loadMs / 1000.0, thermal()))
+                val prev = results[v.key]
+                if (prev == null || ms < prev.getDouble("ms")) results[v.key] = js
             }
         }
         val origMs = results.getValue(OrigNative.key).getDouble("ms")
         out("  best:")
-        for (eng in engines) {
-            val ms = results.getValue(eng.key).getDouble("ms")
-            out("   %-22s %6.2f s   %.2fx the original's speed".format(eng.label, ms / 1000, origMs / ms))
+        for (v in segVariants) {
+            val ms = results.getValue(v.key).getDouble("ms")
+            out("   %-26s %6.2f s   %.2fx the original's speed".format(v.label, ms / 1000, origMs / ms))
         }
         val names = listOf("drums", "bass", "other", "vocals", "guitar", "piano")
         out("  output vs the original, SNR dB (higher = closer; >60 is identical to the ear):")
-        for (eng in listOf(BaseNative, OptNative)) {
-            val cmp = JSONObject(OptNative.compare(File(work, "seg-original.f32").path, File(work, "seg-${eng.key}.f32").path))
+        for (v in segVariants.drop(1)) {
+            val cmp = JSONObject(OptNative.compare(File(work, "seg-original.f32").path, File(work, "seg-${v.key}.f32").path))
             if (cmp.has("snr_db")) {
                 val snr = cmp.getJSONArray("snr_db")
-                out("   %-22s ".format(eng.label) + names.indices.joinToString("  ") { "${names[it]} %.0f".format(snr.getDouble(it)) })
-            } else out("   ${eng.label}: $cmp")
+                out("   %-26s ".format(v.label) + names.indices.joinToString("  ") { "${names[it]} %.0f".format(snr.getDouble(it)) })
+            } else out("   ${v.label}: $cmp")
         }
-        val opt = results.getValue(OptNative.key).getDouble("ms")
 
-        val best = results.getValue(OptNative.key)
-        out("\n  Where the time goes (app engine, per stage):")
-        table(best.getJSONArray("stages"), opt, nameIdx = 0, msIdx = 1, callsIdx = -1)
-        out("\n  Per operation (app engine):")
-        table(best.getJSONArray("ops"), opt, nameIdx = 0, msIdx = 2, callsIdx = 1)
+        val top = if (hasGpu) appGpu else appAll
+        val best = results.getValue(top.key)
+        val topMs = best.getDouble("ms")
+        out("\n  Where the time goes (${top.label}, per stage):")
+        table(best.getJSONArray("stages"), topMs, nameIdx = 0, msIdx = 1, callsIdx = -1)
+        out("\n  Per operation (${top.label}):")
+        table(best.getJSONArray("ops"), topMs, nameIdx = 0, msIdx = 2, callsIdx = 1)
 
         // 2. Full song through the real separation path.
         out("\n2. Full ${songSeconds} s test song, as the app separates it")
         val song = File(work, "song.f32").path
         if (!OptNative.writeSong(song, songSeconds.toDouble())) throw IllegalStateException("could not write the test song")
-        val runs = mutableListOf<Pair<EngineNative, Int>>()
-        if (withBaseline) { runs += OrigNative to 1; runs += BaseNative to 2 }
-        threads.forEach { runs += OptNative to it }
-        for ((eng, t) in runs) {
-            val outDir = File(work, "full-${eng.key}-$t").apply { mkdirs() }
+        val runs = mutableListOf<Pair<Variant, Int>>()
+        if (withBaseline) { runs += OrigNative.plain() to 1; runs += BaseNative.plain() to 2 }
+        threads.forEach { w ->
+            runs += appAll to w
+            if (hasGpu) runs += appGpu to w
+        }
+        for ((v, w) in runs) {
+            setup(v)
+            val outDir = File(work, "full-${v.key}-$w").apply { mkdirs() }
             val rss = PeakRss()
-            val js = JSONObject(eng.separate(model, song, outDir.path, t, 24))
+            val js = JSONObject(v.eng.separate(model, song, outDir.path, w, 24))
             val peak = rss.finish()
             outDir.deleteRecursively()
-            if (js.has("error")) { out("  ${eng.label} ${t}t: ${js.getString("error")}"); continue }
-            val s = js.getDouble("seconds")
-            out("  %-22s %d thread%s: %6.1f s  = %.2fx song length   peak memory %.2f GB   thermal %s".format(
-                eng.label, t, if (t == 1) " " else "s", s, s / songSeconds, peak / 1e6, thermal()))
+            if (js.has("error")) { out("  ${v.label}, $w at once: ${js.getString("error")}"); continue }
+            val sec = js.getDouble("seconds")
+            out("  %-26s %d at once: %6.1f s  = %.2fx song length   peak memory %.2f GB   thermal %s".format(
+                v.label, w, sec, sec / songSeconds, peak / 1e6, thermal()))
         }
+        OptNative.nSetCompute(0, true)
         out("\nDone. Tap Copy and paste the results to Claude.")
     }
 

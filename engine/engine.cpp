@@ -3,6 +3,8 @@
 
 #include "dsp.hpp"
 #include "model.hpp"
+#include "gpu.hpp"
+#include "pool.hpp"
 #include "tensor.hpp"
 
 #include <Eigen/Dense>
@@ -228,6 +230,14 @@ bool cancelled() { return g_cancel.load(std::memory_order_relaxed); }
 
 void request_cancel() { g_cancel.store(true); }
 
+std::string compute_info(const SeparateOptions &opts)
+{
+    sdpool::set_threads(opts.computeThreads);
+    sdgpu::set_enabled(opts.gpu);
+    const int n = sdpool::threads();
+    return std::to_string(n) + (n == 1 ? " core, " : " cores, ") + sdgpu::info();
+}
+
 std::string load_model(const std::string &path)
 {
     std::lock_guard<std::mutex> lk(g_model_mutex);
@@ -240,6 +250,7 @@ std::string load_model(const std::string &path)
             return "The separation model could not be read.";
         if (model->is_4sources)
             return "The model file is the 4-source model, not the 6-source one.";
+        sdgpu::clear_weights(); // the old model's weights, if any
         g_model = std::move(model);
         g_model_path = path;
         return "";
@@ -550,6 +561,10 @@ SeparateResult separate(const std::string &preparedPath,
     };
     const int numSegs = static_cast<int>((NS + STRIDE - 1) / STRIDE);
     const int threads = std::max(1, std::min(opts.threads, numSegs));
+    // The maths inside the segments uses every core (or computeThreads),
+    // and the GPU when it is on.
+    sdpool::set_threads(opts.computeThreads);
+    sdgpu::set_enabled(opts.gpu);
 
     // Demucs' transition weight: a triangle over the segment.
     std::vector<float> weight(SEG, 0.0f);

@@ -25,6 +25,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Vulkan headers and a software GPU (llvmpipe) for the GPU tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libvulkan-dev mesa-vulkan-drivers glslang-tools >/dev/null
       - name: Build the engine for the CI host
         run: |
           cmake -S engine -B build/engine -DCMAKE_BUILD_TYPE=Release
@@ -53,6 +57,32 @@ jobs:
             gh release create model-cache model/htdemucs-6s.bin --repo "${{ github.repository }}" \
               --prerelease --title "Model cache (development only)" \
               --notes "The htdemucs_6s ggml weights, for profiling the engine off-device. Not an app release."
+      - name: GPU path against the CPU (software GPU)
+        run: |
+          set -o pipefail
+          # The checked-in SPIR-V must compile from the shader sources.
+          for f in engine/compute/shaders/*.comp; do glslangValidator -V --target-env vulkan1.1 -o /dev/null "$f"; done
+          SD_GPU_ALLOW_CPU=1 build/engine/sdgpu_test 2>&1 | tee gpu-test.log
+      - name: Full separation, GPU against CPU (software GPU)
+        run: |
+          set -o pipefail
+          build/engine/sdbench_cli song gpu-song.f32 20 >/dev/null
+          mkdir -p out-gpu out-cpu
+          { SD_GPU_ALLOW_CPU=1 build/engine/sdengine_cli separate model/htdemucs-6s.bin gpu-song.f32 out-gpu 2 24
+            SD_NO_GPU=1 build/engine/sdengine_cli separate model/htdemucs-6s.bin gpu-song.f32 out-cpu 2 24
+          } 2>&1 | grep -v "%" | tee gpu-separate.log
+          python3 - <<'PY' | tee -a gpu-separate.log
+          import numpy as np
+          worst = 1e9
+          for s in ["drums", "bass", "other", "vocals", "guitar", "piano"]:
+              a = np.fromfile(f"out-cpu/{s}.wav", np.int16, offset=44).astype(float)
+              b = np.fromfile(f"out-gpu/{s}.wav", np.int16, offset=44).astype(float)
+              n = min(len(a), len(b))
+              snr = 10 * np.log10((a[:n] ** 2).sum() / max(((a[:n] - b[:n]) ** 2).sum(), 1e-9))
+              worst = min(worst, snr)
+              print(f"{s}: GPU vs CPU {snr:.1f} dB")
+          assert worst > 50, "GPU output differs from the CPU's"
+          PY
       - name: Test the engine
         run: |
           pip install --quiet numpy pyloudnorm

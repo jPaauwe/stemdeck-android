@@ -1,6 +1,9 @@
 #ifndef CONV_HPP
 #define CONV_HPP
 
+#include "gemm.hpp"
+#include "gpu.hpp"
+#include "pool.hpp"
 #include "model.hpp"
 #include "tensor.hpp"
 #include <Eigen/Dense>
@@ -110,7 +113,9 @@ Eigen::Tensor3dXf conv2d_stride1_scatter(const Eigen::Tensor3dXf &x,
             for (int o = 0; o < out_channels; ++o)
                 for (int c = 0; c < in_channels; ++c)
                     Wk(o, c) = w(o, c, kh, kw);
-            P.noalias() = Wk * X; // contribution of every input position
+            P.resize(out_channels, X.cols()); // contribution of every input position
+            sdgemm::gemm(false, false, out_channels, int(X.cols()), in_channels, 1.0f, Wk.data(),
+                         out_channels, X.data(), in_channels, 0.0f, P.data(), out_channels);
 
             // input (ih, iw) feeds output (ih - kh*dh + ph, iw - kw*dw + pw)
             for (int ow = 0; ow < out_width; ++ow)
@@ -173,9 +178,13 @@ Eigen::Tensor3dXf conv2d_stride1_taps(const Eigen::Tensor3dXf &x,
     Eigen::Map<const Eigen::VectorXf> bias(b.data(), out_channels);
     Y.colwise() = bias;
 
-    Eigen::MatrixXf Wk(out_channels, in_channels);
-    Eigen::MatrixXf G, GW;
-    std::vector<Eigen::Index> fix;
+    struct Tap
+    {
+        int dh, ow_lo, ow_hi;
+        Eigen::Index delta, p_lo, p_hi;
+        Eigen::MatrixXf Wk;
+    };
+    std::vector<Tap> taps;
     for (int kh = 0; kh < kernel_height; ++kh)
     {
         for (int kw = 0; kw < kernel_width; ++kw)
@@ -186,10 +195,6 @@ Eigen::Tensor3dXf conv2d_stride1_taps(const Eigen::Tensor3dXf &x,
             const int ow_hi = std::min(OW, W - dw);
             if (ow_lo >= ow_hi || std::abs(dh) >= H)
                 continue;
-            for (int o = 0; o < out_channels; ++o)
-                for (int c = 0; c < in_channels; ++c)
-                    Wk(o, c) = w(o, c, kh, kw);
-
             const Eigen::Index delta = dh + Eigen::Index(H) * dw;
             Eigen::Index p_lo = Eigen::Index(ow_lo) * H;
             Eigen::Index p_hi = Eigen::Index(ow_hi) * H;
@@ -198,33 +203,73 @@ Eigen::Tensor3dXf conv2d_stride1_taps(const Eigen::Tensor3dXf &x,
             p_hi = std::min(p_hi, P - delta);
             if (p_lo >= p_hi)
                 continue;
-            Y.middleCols(p_lo, p_hi - p_lo).noalias() +=
-                Wk * X.middleCols(p_lo + delta, p_hi - p_lo);
-
-            if (dh == 0)
-                continue;
-            // rows whose h + dh is outside [0, H) took a wrapped input
-            fix.clear();
-            for (int ow = ow_lo; ow < ow_hi; ++ow)
-            {
-                const int r0 = dh < 0 ? 0 : H - dh;
-                const int r1 = dh < 0 ? -dh : H;
-                for (int r = r0; r < r1; ++r)
-                {
-                    const Eigen::Index p = r + Eigen::Index(H) * ow;
-                    if (p >= p_lo && p < p_hi)
-                        fix.push_back(p);
-                }
-            }
-            if (fix.empty())
-                continue;
-            G.resize(in_channels, Eigen::Index(fix.size()));
-            for (size_t f = 0; f < fix.size(); ++f)
-                G.col(f) = X.col(fix[f] + delta);
-            GW.noalias() = Wk * G;
-            for (size_t f = 0; f < fix.size(); ++f)
-                Y.col(fix[f]) -= GW.col(f);
+            Tap t{dh, ow_lo, ow_hi, delta, p_lo, p_hi, Eigen::MatrixXf(out_channels, in_channels)};
+            for (int o = 0; o < out_channels; ++o)
+                for (int c = 0; c < in_channels; ++c)
+                    t.Wk(o, c) = w(o, c, kh, kw);
+            taps.push_back(std::move(t));
         }
+    }
+
+    // 1. One product per tap, accumulated into Y: as one GPU batch when the
+    //    GPU is free and the work is large enough, else on every core.
+    bool done = false;
+    double macs = 0;
+    for (const Tap &t : taps)
+        macs += double(out_channels) * in_channels * double(t.p_hi - t.p_lo);
+    if (macs >= 24.0e6)
+    {
+        if (auto g = sdgpu::Batch::try_begin())
+        {
+            SD_PROF("gpu: conv stride 1");
+            sdgpu::Buf xb = g->input(x.data(), size_t(in_channels) * P);
+            sdgpu::Buf yb = g->input(Y.data(), size_t(out_channels) * OP);
+            for (const Tap &t : taps)
+            {
+                sdgpu::Buf wb = g->input(t.Wk.data(), size_t(out_channels) * in_channels);
+                g->gemm(false, false, out_channels, uint32_t(t.p_hi - t.p_lo), in_channels, 1.0f, wb, 0,
+                        out_channels, xb, size_t(t.p_lo + t.delta) * in_channels, in_channels, 1.0f, yb,
+                        size_t(t.p_lo) * out_channels, out_channels);
+            }
+            g->output(yb, 0, Y.data(), size_t(out_channels) * OP);
+            done = g->run();
+        }
+    }
+    if (!done)
+        for (const Tap &t : taps)
+            sdgemm::gemm_cpu(false, false, out_channels, int(t.p_hi - t.p_lo), in_channels, 1.0f, t.Wk.data(),
+                             out_channels, x.data() + size_t(t.p_lo + t.delta) * in_channels, in_channels, 1.0f,
+                             Y.data() + size_t(t.p_lo) * out_channels, out_channels);
+
+    // 2. Rows whose h + dh is outside [0, H) took a wrapped input: subtract
+    //    those contributions again.
+    Eigen::MatrixXf G, GW;
+    std::vector<Eigen::Index> fix;
+    for (const Tap &t : taps)
+    {
+        const int dh = t.dh;
+        if (dh == 0)
+            continue;
+        fix.clear();
+        for (int ow = t.ow_lo; ow < t.ow_hi; ++ow)
+        {
+            const int r0 = dh < 0 ? 0 : H - dh;
+            const int r1 = dh < 0 ? -dh : H;
+            for (int r = r0; r < r1; ++r)
+            {
+                const Eigen::Index p = r + Eigen::Index(H) * ow;
+                if (p >= t.p_lo && p < t.p_hi)
+                    fix.push_back(p);
+            }
+        }
+        if (fix.empty())
+            continue;
+        G.resize(in_channels, Eigen::Index(fix.size()));
+        for (size_t f = 0; f < fix.size(); ++f)
+            G.col(f) = X.col(fix[f] + t.delta);
+        GW.noalias() = t.Wk * G;
+        for (size_t f = 0; f < fix.size(); ++f)
+            Y.col(fix[f]) -= GW.col(f);
     }
     return y_out;
 }
@@ -277,7 +322,10 @@ Eigen::Tensor3dXf conv2d(const Eigen::Tensor3dXf &x, const Eigen::Tensor4dXf &w,
         reshaped_weights_tensor.dimension(1));
 
     // Perform matrix multiplication with GEMM
-    Eigen::MatrixXf result = im2col_matrix * reshaped_weights.transpose();
+    Eigen::MatrixXf result(im2col_matrix.rows(), out_channels);
+    sdgemm::gemm(false, true, int(im2col_matrix.rows()), out_channels, int(im2col_matrix.cols()), 1.0f,
+                 im2col_matrix.data(), int(im2col_matrix.rows()), reshaped_weights.data(), out_channels, 0.0f,
+                 result.data(), int(im2col_matrix.rows()));
 
     // Add bias to each column of the result matrix
     for (int chout = 0; chout < out_channels; ++chout)
@@ -349,7 +397,10 @@ Eigen::Tensor3dXf conv2d_fused_gelu(const Eigen::Tensor3dXf &x,
         reshaped_weights_tensor.dimension(1));
 
     // Perform matrix multiplication with GEMM
-    Eigen::MatrixXf result = im2col_matrix * reshaped_weights.transpose();
+    Eigen::MatrixXf result(im2col_matrix.rows(), out_channels);
+    sdgemm::gemm(false, true, int(im2col_matrix.rows()), out_channels, int(im2col_matrix.cols()), 1.0f,
+                 im2col_matrix.data(), int(im2col_matrix.rows()), reshaped_weights.data(), out_channels, 0.0f,
+                 result.data(), int(im2col_matrix.rows()));
 
     // Add bias to each column of the result matrix
     for (int chout = 0; chout < out_channels; ++chout)
@@ -546,13 +597,16 @@ Eigen::Tensor3dXf conv2d_tr_scatter(const Eigen::Tensor3dXf &x,
                 for (int o = 0; o < out_channels; ++o)
                     Wk(o, c) = w(c, o, kh, kw);
 
-            P.noalias() = Wk * X; // (Cout, H*W)
+            P.resize(out_channels, X.cols()); // (Cout, H*W)
+            sdgemm::gemm(false, false, out_channels, int(X.cols()), in_channels, 1.0f, Wk.data(),
+                         out_channels, X.data(), in_channels, 0.0f, P.data(), out_channels);
 
-            for (int iw = 0; iw < in_width; ++iw)
-            {
+            // Within one tap, each input column lands in a different output
+            // column, so the columns can be scattered in parallel.
+            sdpool::parallel_for(in_width, [&](int iw) {
                 const int ow = iw * stride_width + kw * dilation_width - pad_width;
                 if (ow < 0 || ow >= out_width)
-                    continue;
+                    return;
                 for (int ih = 0; ih < in_height; ++ih)
                 {
                     const int oh =
@@ -566,22 +620,26 @@ Eigen::Tensor3dXf conv2d_tr_scatter(const Eigen::Tensor3dXf &x,
                     for (int o = 0; o < out_channels; ++o)
                         dst[o] += src[o];
                 }
-            }
+            });
         }
     }
 
     const Eigen::Index n = (Eigen::Index)out_height * out_width;
-    for (Eigen::Index i = 0; i < n; ++i)
-    {
-        float *v = y + i * out_channels;
-        for (int o = 0; o < out_channels; ++o)
+    const Eigen::Index chunk = 4096;
+    sdpool::parallel_for(int((n + chunk - 1) / chunk), [&](int t) {
+        const Eigen::Index i1 = std::min(n, (t + 1) * chunk);
+        for (Eigen::Index i = t * chunk; i < i1; ++i)
         {
-            float value = v[o] + b(o);
-            if (fused_gelu)
-                value = 0.5f * value * (1.0f + std::erf(value / std::sqrt(2.0f)));
-            v[o] = value;
+            float *v = y + i * out_channels;
+            for (int o = 0; o < out_channels; ++o)
+            {
+                float value = v[o] + b(o);
+                if (fused_gelu)
+                    value = 0.5f * value * (1.0f + std::erf(value / std::sqrt(2.0f)));
+                v[o] = value;
+            }
         }
-    }
+    });
     return y_out;
 }
 

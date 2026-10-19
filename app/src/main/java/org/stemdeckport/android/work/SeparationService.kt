@@ -188,11 +188,19 @@ class SeparationService : Service() {
             val stemsDir = store.stemsDir(id).apply { mkdirs() }
             val mp3 = job.format == "mp3"
             val sepEnd = if (mp3) 0.93 else 0.99
-            set("separating", "Separating stems", 0.10, persist = true)
+            // Every core, plus the GPU when it is on and passes its self-test.
+            val useGpu = app.settings.gpu
+            val compute = NativeEngine.computeInfo(useGpu)
+            Log.i(TAG, "job $id: $compute")
+            val cores = compute.substringBefore(',').trim()
+            val onGpu = compute.contains("GPU: ")
+            val sepStage = "Separating stems ($cores${if (onGpu) " + GPU" else ""})"
+            store.update(id) { it.computeDevice = compute }
+            set("separating", sepStage, 0.10, persist = true)
             val rms = NativeEngine.separate(
-                prepared.path, stemsDir.path, selected.toSet(), app.separationThreads(), CHUNK_SECONDS,
+                prepared.path, stemsDir.path, selected.toSet(), app.separationThreads(), CHUNK_SECONDS, useGpu,
             ) { f, _ ->
-                set("separating", "Separating stems", 0.10 + (sepEnd - 0.10) * f); !stopped()
+                set("separating", sepStage, 0.10 + (sepEnd - 0.10) * f); !stopped()
             }
             val written = NativeEngine.SOURCES.filter { it in selected }
 

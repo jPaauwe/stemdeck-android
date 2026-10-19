@@ -20,9 +20,23 @@ endif()
 
 function(sd_engine_library name src_dir)
   cmake_parse_arguments(ARG "PROFILE" "" "" ${ARGN})
-  file(GLOB srcs "${src_dir}/demucs/*.cpp")
+  # compute/ (thread pool, GPU) exists from the all-cores + GPU engine on.
+  file(GLOB srcs "${src_dir}/demucs/*.cpp" "${src_dir}/compute/*.cpp")
   add_library(${name} STATIC ${srcs} "${src_dir}/engine.cpp" "${SD_ENGINE_DIR}/sdprof.cpp")
   target_include_directories(${name} PUBLIC "${EIGEN_DIR}" "${src_dir}/demucs" "${src_dir}")
+  if(EXISTS "${src_dir}/compute")
+    target_include_directories(${name} PUBLIC "${src_dir}/compute")
+    if(NOT ANDROID)
+      # Vulkan headers on a computer: from the system, or VULKAN_HEADERS.
+      if(VULKAN_HEADERS)
+        target_include_directories(${name} PRIVATE "${VULKAN_HEADERS}")
+      endif()
+      find_package(Threads REQUIRED)
+      target_link_libraries(${name} PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+    else()
+      target_link_libraries(${name} PUBLIC dl)
+    endif()
+  endif()
   target_compile_options(${name} PRIVATE
     -O3 -fno-unsafe-math-optimizations -freciprocal-math -fno-signed-zeros
     -fexceptions -frtti -fvisibility=hidden -fvisibility-inlines-hidden
@@ -41,6 +55,9 @@ if(NOT ANDROID AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   find_package(Threads REQUIRED)
   add_executable(sdengine_cli test/engine_cli.cpp)
   target_link_libraries(sdengine_cli sdengine_core Threads::Threads)
+
+  add_executable(sdgpu_test test/gpu_test.cpp)
+  target_link_libraries(sdgpu_test sdengine_core Threads::Threads)
 
   sd_engine_library(sdengine_core_prof "${CMAKE_CURRENT_SOURCE_DIR}" PROFILE)
   add_executable(sdbench_cli test/bench_cli.cpp bench/bench_core.cpp)

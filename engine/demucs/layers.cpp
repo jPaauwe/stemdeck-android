@@ -3,6 +3,9 @@
 #include "lstm.hpp"
 #include "model.hpp"
 #include "tensor.hpp"
+#include "gemm.hpp"
+#include "gpu.hpp"
+#include "pool.hpp"
 #include <Eigen/Dense>
 #include <unsupported/Eigen/CXX11/Tensor>
 
@@ -23,31 +26,49 @@ Eigen::Tensor3dXf demucscpp::group_norm(const Eigen::Tensor3dXf &x,
     const int gs = C / G;
     const float *xp = x.data();
 
-    // mean per (i, g)
+    // mean per (i, g), then variance: partial sums over chunks of w, one
+    // chunk per task (all cores), added up in chunk order.
+    const int chunks = std::max(1, std::min(W, 4 * sdpool::threads()));
+    const int step = (W + chunks - 1) / chunks;
+    const int tasks = (W + step - 1) / step;
+    std::vector<std::vector<double>> part(tasks);
+    auto accumulate = [&](bool second, const std::vector<double> *meanp) {
+        sdpool::parallel_for(tasks, [&](int t) {
+            std::vector<double> &acc = part[t];
+            acc.assign(size_t(F) * G, 0.0);
+            const int w1 = std::min(W, (t + 1) * step);
+            for (int w = t * step; w < w1; ++w)
+                for (int c = 0; c < C; ++c)
+                {
+                    const float *col = xp + size_t(F) * (c + size_t(C) * w);
+                    double *a = acc.data() + size_t(F) * (c / gs);
+                    if (!second)
+                        for (int i = 0; i < F; ++i)
+                            a[i] += col[i];
+                    else
+                    {
+                        const double *m = meanp->data() + size_t(F) * (c / gs);
+                        for (int i = 0; i < F; ++i)
+                        {
+                            const double d = col[i] - m[i];
+                            a[i] += d * d;
+                        }
+                    }
+                }
+        });
+    };
     std::vector<double> mean(size_t(F) * G, 0.0), var(size_t(F) * G, 0.0);
-    for (int w = 0; w < W; ++w)
-        for (int c = 0; c < C; ++c)
-        {
-            const float *col = xp + size_t(F) * (c + size_t(C) * w);
-            double *m = mean.data() + size_t(F) * (c / gs);
-            for (int i = 0; i < F; ++i)
-                m[i] += col[i];
-        }
+    accumulate(false, nullptr);
+    for (auto &pt : part)
+        for (size_t k = 0; k < mean.size(); ++k)
+            mean[k] += pt[k];
     const double n = double(gs) * W;
     for (double &m : mean)
         m /= n;
-    for (int w = 0; w < W; ++w)
-        for (int c = 0; c < C; ++c)
-        {
-            const float *col = xp + size_t(F) * (c + size_t(C) * w);
-            const double *m = mean.data() + size_t(F) * (c / gs);
-            double *v = var.data() + size_t(F) * (c / gs);
-            for (int i = 0; i < F; ++i)
-            {
-                const double d = col[i] - m[i];
-                v[i] += d * d;
-            }
-        }
+    accumulate(true, &mean);
+    for (auto &pt : part)
+        for (size_t k = 0; k < var.size(); ++k)
+            var[k] += pt[k];
     std::vector<float> inv(size_t(F) * G), mf(size_t(F) * G);
     for (size_t k = 0; k < inv.size(); ++k)
     {
@@ -57,18 +78,21 @@ Eigen::Tensor3dXf demucscpp::group_norm(const Eigen::Tensor3dXf &x,
 
     Eigen::Tensor3dXf y_out(F, C, W);
     float *yp = y_out.data();
-    for (int w = 0; w < W; ++w)
-        for (int c = 0; c < C; ++c)
-        {
-            const size_t off = size_t(F) * (c + size_t(C) * w);
-            const float *col = xp + off;
-            float *out = yp + off;
-            const float *iv = inv.data() + size_t(F) * (c / gs);
-            const float *m = mf.data() + size_t(F) * (c / gs);
-            const float wc = weight(c), bc = b(c);
-            for (int i = 0; i < F; ++i)
-                out[i] = (col[i] - m[i]) * (iv[i] * wc) + bc;
-        }
+    sdpool::parallel_for(tasks, [&](int t) {
+        const int w1 = std::min(W, (t + 1) * step);
+        for (int w = t * step; w < w1; ++w)
+            for (int c = 0; c < C; ++c)
+            {
+                const size_t off = size_t(F) * (c + size_t(C) * w);
+                const float *col = xp + off;
+                float *out = yp + off;
+                const float *iv = inv.data() + size_t(F) * (c / gs);
+                const float *m = mf.data() + size_t(F) * (c / gs);
+                const float wc = weight(c), bc = b(c);
+                for (int i = 0; i < F; ++i)
+                    out[i] = (col[i] - m[i]) * (iv[i] * wc) + bc;
+            }
+    });
     return y_out;
 }
 
@@ -112,24 +136,31 @@ Eigen::Tensor3dXf demucscpp::glu(const Eigen::Tensor3dXf &x, const int dim)
         Eigen::Map<Eigen::ArrayXf> O(o, len);
         O = A / (1.0f + (-G).exp());
     };
+    // Over w in chunks, on every core.
+    const int tasks = std::max(1, std::min(W, 4 * sdpool::threads()));
+    const int step = (W + tasks - 1) / tasks;
     if (dim == 0)
     {
         const int h = F / 2;
-        for (int w = 0; w < W; ++w)
-            for (int c = 0; c < C; ++c)
-            {
-                const float *col = xp + size_t(F) * (c + size_t(C) * w);
-                run(col, col + h, yp + size_t(h) * (c + size_t(C) * w), h);
-            }
+        sdpool::parallel_for((W + step - 1) / step, [&](int t) {
+            for (int w = t * step; w < std::min(W, (t + 1) * step); ++w)
+                for (int c = 0; c < C; ++c)
+                {
+                    const float *col = xp + size_t(F) * (c + size_t(C) * w);
+                    run(col, col + h, yp + size_t(h) * (c + size_t(C) * w), h);
+                }
+        });
     }
     else if (dim == 1)
     {
         const int h = C / 2;
-        for (int w = 0; w < W; ++w)
-        {
-            const float *blk = xp + size_t(F) * C * w;
-            run(blk, blk + size_t(F) * h, yp + size_t(F) * h * w, Eigen::Index(F) * h);
-        }
+        sdpool::parallel_for((W + step - 1) / step, [&](int t) {
+            for (int w = t * step; w < std::min(W, (t + 1) * step); ++w)
+            {
+                const float *blk = xp + size_t(F) * C * w;
+                run(blk, blk + size_t(F) * h, yp + size_t(F) * h * w, Eigen::Index(F) * h);
+            }
+        });
     }
     else
     {
@@ -397,6 +428,70 @@ void demucscpp::apply_dconv(const struct demucscpp::demucs_model &model,
     y = y + y_copy;
 }
 
+// StemDeck Android: multi-head attention, out = softmax(Q K^T) V per head.
+// Qs (T x C) is already scaled; K, V are (S x C); head h is the column
+// block [h*hd, (h+1)*hd). On the GPU, each head is two products and a
+// softmax in one batch. On the CPU, the (head, block of 128 queries)
+// pairs are spread over every core; each computes the scores transposed
+// (keys x queries) so each query's softmax runs down one contiguous column.
+void demucscpp::attention_heads(const Eigen::MatrixXf &Qs, const Eigen::MatrixXf &K, const Eigen::MatrixXf &V,
+                                int num_heads, Eigen::MatrixXf &out)
+{
+    const int T = static_cast<int>(Qs.rows());
+    const int S = static_cast<int>(K.rows());
+    const int C = static_cast<int>(Qs.cols());
+    const int hd = C / num_heads;
+    out.resize(T, C);
+
+    if (double(T) * S * C >= 16.0e6)
+    {
+        if (auto g = sdgpu::Batch::try_begin())
+        {
+            SD_PROF("gpu: attention");
+            sdgpu::Buf q = g->input(Qs.data(), size_t(T) * C);
+            sdgpu::Buf k = g->input(K.data(), size_t(S) * C);
+            sdgpu::Buf v = g->input(V.data(), size_t(S) * C);
+            sdgpu::Buf sc = g->scratch(size_t(S) * T);
+            sdgpu::Buf o = g->scratch(size_t(T) * C);
+            for (int h = 0; h < num_heads; ++h)
+            {
+                const size_t off = size_t(h) * hd;
+                // scores (S x T) = K_h (S x hd) * Q_h^T (hd x T)
+                g->gemm(false, true, S, T, hd, 1.0f, k, off * S, S, q, off * T, T, 0.0f, sc, 0, S);
+                g->softmax_cols(sc, 0, S, T, S);
+                // out_h (T x hd) = scores^T (T x S) * V_h (S x hd)
+                g->gemm(true, false, T, hd, S, 1.0f, sc, 0, S, v, off * S, S, 0.0f, o, off * T, T);
+            }
+            g->output(o, 0, out.data(), size_t(T) * C);
+            if (g->run())
+                return;
+        }
+    }
+
+    constexpr int kBlock = 128;
+    const int blocks = (T + kBlock - 1) / kBlock;
+    sdpool::parallel_for(num_heads * blocks, [&](int task) {
+        const int h = task / blocks;
+        const int q0 = (task % blocks) * kBlock;
+        const int nb = std::min(kBlock, T - q0);
+        const Eigen::Index off = Eigen::Index(h) * hd;
+        Eigen::Map<const Eigen::MatrixXf> Qh(Qs.data() + off * T, T, hd);
+        Eigen::Map<const Eigen::MatrixXf> Kh(K.data() + off * S, S, hd);
+        Eigen::Map<const Eigen::MatrixXf> Vh(V.data() + off * S, S, hd);
+        thread_local Eigen::MatrixXf scores;
+        scores.resize(S, nb);
+        scores.noalias() = Kh * Qh.middleRows(q0, nb).transpose();
+        for (int j = 0; j < nb; ++j)
+        {
+            auto col = scores.col(j).array();
+            const float mx = col.maxCoeff();
+            col = (col - mx).exp();
+            col *= 1.0f / col.sum();
+        }
+        out.block(q0, off, nb, hd).noalias() = scores.transpose() * Vh;
+    });
+}
+
 void demucscpp::common_encoder_layer(
     Eigen::Tensor3dXf &q,       // q = x = frequency
     const Eigen::Tensor3dXf &k, // k = xt = time
@@ -440,19 +535,18 @@ void demucscpp::common_encoder_layer(
     // Reshape q, k to 2D matrix of dimensions (T*B, C)
 
     // Use Eigen::Map to avoid manual loops for reshaping
+    // StemDeck Android: the projections, attention and feed-forward go
+    // through sdgemm (GPU when free, otherwise every core), and attention
+    // runs as one GPU batch when it can. Same maths as upstream.
     SD_PROF_BEGIN(qkv, "attention: Q/K/V projection");
-    Eigen::MatrixXf q_norm_2d =
-        Eigen::Map<const Eigen::MatrixXf>(q_norm.data(), T, C);
-    Eigen::MatrixXf k_norm_2d =
-        Eigen::Map<const Eigen::MatrixXf>(k_norm.data(), S, C);
-
-    // Compute Q, K, V matrices
-    Eigen::MatrixXf Q =
-        q_norm_2d * in_proj_weight.block(0, 0, C, C).transpose();
-    Eigen::MatrixXf K =
-        k_norm_2d * in_proj_weight.block(C, 0, C, C).transpose();
-    Eigen::MatrixXf V =
-        k_norm_2d * in_proj_weight.block(2 * C, 0, C, C).transpose();
+    const int ldw = static_cast<int>(in_proj_weight.rows()); // 3C
+    Eigen::MatrixXf Q(T, C), K(S, C), V(S, C);
+    sdgemm::gemm(false, true, T, C, C, 1.0f, q_norm.data(), T, in_proj_weight.data(), ldw, 0.0f, Q.data(), T,
+                 sdgemm::kConstB);
+    sdgemm::gemm(false, true, S, C, C, 1.0f, k_norm.data(), S, in_proj_weight.data() + C, ldw, 0.0f, K.data(), S,
+                 sdgemm::kConstB);
+    sdgemm::gemm(false, true, S, C, C, 1.0f, k_norm.data(), S, in_proj_weight.data() + 2 * C, ldw, 0.0f, V.data(),
+                 S, sdgemm::kConstB);
 
     Eigen::VectorXf q_bias = in_proj_bias.segment(0, C);
     Eigen::VectorXf k_bias = in_proj_bias.segment(C, C);
@@ -465,42 +559,11 @@ void demucscpp::common_encoder_layer(
     SD_PROF_END(qkv);
 
     SD_PROF_BEGIN(heads, "attention: scores + softmax + weighted sum");
-    // StemDeck Android: per-head attention without copies. Q, K and V are
-    // column-major (rows = tokens), so head h is the contiguous column block
-    // [h*hd, (h+1)*hd). Queries are processed in blocks: the scores for a
-    // block are computed transposed (keys x queries), so each query's
-    // softmax runs down one contiguous column, and the block stays in cache.
-    // Same maths as upstream (max-subtracted softmax), different rounding.
     const int head_split = C / num_heads;
     const float scale = 1.0f / std::sqrt((float)head_split);
     Eigen::MatrixXf cross_attn_out(T, C);
-    {
-        constexpr int kBlock = 128;
-        Eigen::MatrixXf scores(S, kBlock);
-        Eigen::MatrixXf Qs = Q * scale;
-        for (int h = 0; h < num_heads; ++h)
-        {
-            const Eigen::Index off = Eigen::Index(h) * head_split;
-            Eigen::Map<const Eigen::MatrixXf> Qh(Qs.data() + off * T, T, head_split);
-            Eigen::Map<const Eigen::MatrixXf> Kh(K.data() + off * S, S, head_split);
-            Eigen::Map<const Eigen::MatrixXf> Vh(V.data() + off * S, S, head_split);
-            for (int q0 = 0; q0 < T; q0 += kBlock)
-            {
-                const int nb = std::min(kBlock, T - q0);
-                auto sc = scores.leftCols(nb);
-                sc.noalias() = Kh * Qh.middleRows(q0, nb).transpose();
-                for (int j = 0; j < nb; ++j)
-                {
-                    auto col = sc.col(j).array();
-                    const float mx = col.maxCoeff();
-                    col = (col - mx).exp();
-                    col *= 1.0f / col.sum();
-                }
-                cross_attn_out.block(q0, off, nb, head_split).noalias() =
-                    sc.transpose() * Vh;
-            }
-        }
-    }
+    Eigen::MatrixXf Qs = Q * scale;
+    demucscpp::attention_heads(Qs, K, V, num_heads, cross_attn_out);
     SD_PROF_END(heads);
 
     // Copy q into q_2d (Map q to 2D matrix)
@@ -508,7 +571,9 @@ void demucscpp::common_encoder_layer(
     SD_PROF_BEGIN(oproj, "attention: output projection");
 
     // Apply output projection with gamma1_scale
-    Eigen::MatrixXf out_proj = cross_attn_out * out_proj_weight.transpose();
+    Eigen::MatrixXf out_proj(T, C);
+    sdgemm::gemm(false, true, T, C, C, 1.0f, cross_attn_out.data(), T, out_proj_weight.data(),
+                 static_cast<int>(out_proj_weight.rows()), 0.0f, out_proj.data(), T, sdgemm::kConstB);
     out_proj.array().rowwise() += out_proj_bias.transpose().array();
     out_proj = out_proj.array().rowwise() * gamma1_scale.transpose().array();
 
@@ -518,12 +583,14 @@ void demucscpp::common_encoder_layer(
 
     // before feedforward, apply norm3 to x i.e. q
     q_norm = demucscpp::layer_norm(q, norm3_weight, norm3_bias, eps);
-    q_norm_2d = Eigen::Map<const Eigen::MatrixXf>(q_norm.data(), T, C);
 
     // Feedforward block
     // Linear layer 1
     SD_PROF_BEGIN(ffn1, "transformer feed-forward (linear 1)");
-    Eigen::MatrixXf ff1 = q_norm_2d * linear1_weight.transpose();
+    const int F = static_cast<int>(linear1_weight.rows());
+    Eigen::MatrixXf ff1(T, F);
+    sdgemm::gemm(false, true, T, F, C, 1.0f, q_norm.data(), T, linear1_weight.data(), F, 0.0f, ff1.data(), T,
+                 sdgemm::kConstB);
     ff1.rowwise() += linear1_bias.transpose();
     SD_PROF_END(ffn1);
 
@@ -531,7 +598,9 @@ void demucscpp::common_encoder_layer(
 
     // Linear layer 2
     SD_PROF_BEGIN(ffn, "transformer feed-forward (linear 2)");
-    Eigen::MatrixXf ff2 = ff1 * linear2_weight.transpose();
+    Eigen::MatrixXf ff2(T, C);
+    sdgemm::gemm(false, true, T, C, F, 1.0f, ff1.data(), T, linear2_weight.data(),
+                 static_cast<int>(linear2_weight.rows()), 0.0f, ff2.data(), T, sdgemm::kConstB);
     ff2.rowwise() += linear2_bias.transpose();
 
     // Apply gamma_2 scale directly on 2D matrix

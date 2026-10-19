@@ -24,9 +24,17 @@ object NativeEngine {
     @JvmStatic private external fun nativeAnalyze(path: String): DoubleArray
     @JvmStatic private external fun nativeSeparate(
         prepared: String, outDir: String, write: BooleanArray, threads: Int,
-        chunkSeconds: Int, listener: ProgressListener?,
+        chunkSeconds: Int, computeThreads: Int, gpu: Boolean, listener: ProgressListener?,
     ): DoubleArray
+    @JvmStatic private external fun nativeComputeInfo(computeThreads: Int, gpu: Boolean): String
     @JvmStatic private external fun nativeCancel()
+
+    /**
+     * What separation runs on, e.g. "10 cores, GPU: Samsung Xclipse 940
+     * (Vulkan 1.3)", or why the GPU is not used. Starts the GPU (and its
+     * self-test) on first call.
+     */
+    fun computeInfo(gpu: Boolean, computeThreads: Int = 0): String = nativeComputeInfo(computeThreads, gpu)
 
     /** Throws IllegalStateException with a readable message on failure. */
     @Synchronized
@@ -57,15 +65,17 @@ object NativeEngine {
 
     /**
      * Writes <outDir>/<source>.wav for every selected source and returns the
-     * RMS of each (0 for sources not written), in [SOURCES] order.
-     * Throws CancellationException when cancelled, RuntimeException on failure.
+     * RMS of each (0 for sources not written), in [SOURCES] order. [threads]
+     * segments run at once; their maths uses every core, and the GPU when
+     * [gpu] is on. Throws CancellationException when cancelled,
+     * RuntimeException on failure.
      */
     fun separate(
         prepared: String, outDir: String, selected: Set<String>, threads: Int,
-        chunkSeconds: Int, listener: ProgressListener,
+        chunkSeconds: Int, gpu: Boolean, listener: ProgressListener,
     ): DoubleArray {
         val write = BooleanArray(SOURCES.size) { SOURCES[it] in selected }
-        return nativeSeparate(prepared, outDir, write, threads, chunkSeconds, listener)
+        return nativeSeparate(prepared, outDir, write, threads, chunkSeconds, 0, gpu, listener)
     }
 
     fun cancel() = nativeCancel()

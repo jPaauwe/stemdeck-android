@@ -13,17 +13,19 @@ interface EngineNative {
     fun separate(model: String, song: String, outDir: String, threads: Int, chunkSeconds: Int): String
 }
 
-/** The app's engine (build 13), with per-operation profiling. */
+/** The app's engine (build 13 + every core + GPU), with per-operation profiling. */
 object OptNative : EngineNative {
     init { System.loadLibrary("sdbench_opt") }
     override val key = "app"
-    override val label = "app engine (build 13)"
+    override val label = "app engine"
     @JvmStatic external fun nLoad(path: String): String
     @JvmStatic external fun nFree()
     @JvmStatic external fun nProfile(out: String): String
     @JvmStatic external fun nWriteSong(path: String, seconds: Double): Boolean
     @JvmStatic external fun nCompare(a: String, b: String): String
     @JvmStatic external fun nSeparate(model: String, song: String, outDir: String, threads: Int, chunk: Int): String
+    /** Threads doing maths (0 = all cores) and the GPU from now on; returns what that is on this phone. */
+    @JvmStatic external fun nSetCompute(threads: Int, gpu: Boolean): String
     override fun load(path: String) = nLoad(path)
     override fun free() = nFree()
     override fun profile(out: String) = nProfile(out)

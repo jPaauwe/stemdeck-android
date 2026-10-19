@@ -5,6 +5,7 @@
 //   sdengine_cli prepare  <raw.f32> <rate> <channels> <out.f32>
 //   sdengine_cli analyze  <prepared.f32>
 //   sdengine_cli separate <model.bin> <prepared.f32> <outdir> [threads] [chunkSeconds]
+//     (env SD_NO_GPU=1 for CPU only, SD_THREADS=n for the maths threads)
 #include "engine.hpp"
 
 #include <chrono>
@@ -66,6 +67,13 @@ int main(int argc, char **argv)
             opts.threads = std::atoi(argv[5]);
         if (argc > 6)
             opts.chunkSeconds = std::atoi(argv[6]);
+#ifdef SDENGINE_HAS_COMPUTE
+        // SD_NO_GPU=1: CPU only. SD_THREADS=n: threads doing maths.
+        opts.gpu = std::getenv("SD_NO_GPU") == nullptr;
+        if (const char *t = std::getenv("SD_THREADS"))
+            opts.computeThreads = std::atoi(t);
+        std::fprintf(stderr, "%s\n", sdengine::compute_info(opts).c_str());
+#endif
         auto t0 = std::chrono::steady_clock::now();
         sdengine::SeparateResult r =
             sdengine::separate(argv[3], argv[4], opts, printProgress);

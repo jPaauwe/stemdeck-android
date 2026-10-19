@@ -42,16 +42,17 @@ foreach(line IN LISTS engine_lines)
   list(GET fields 1 label)
   list(GET fields 2 description)
   list(GET fields 3 src)
-  file(GLOB demucs_srcs "${src}/demucs/*.cpp")
+  # compute/ (thread pool, GPU) exists from the all-cores + GPU engine on.
+  file(GLOB demucs_srcs "${src}/demucs/*.cpp" "${src}/compute/*.cpp")
   add_library(sdengine_${id} SHARED plugin.cpp ${demucs_srcs})
-  target_include_directories(sdengine_${id} PRIVATE "${src}" "${src}/demucs" "${EIGEN_DIR}")
+  target_include_directories(sdengine_${id} PRIVATE "${src}" "${src}/demucs" "${src}/compute" "${EIGEN_DIR}")
   target_compile_definitions(sdengine_${id} PRIVATE NDEBUG EIGEN_NO_DEBUG)
   # Same flags every engine version shipped with.
   target_compile_options(sdengine_${id} PRIVATE
     -O3 -fno-unsafe-math-optimizations -freciprocal-math -fno-signed-zeros
     -fexceptions -frtti -fvisibility=hidden -fvisibility-inlines-hidden
     -Wno-unused-parameter -Wno-sign-compare -w)
-  target_link_libraries(sdengine_${id} ${log-lib})
+  target_link_libraries(sdengine_${id} ${log-lib} dl)
   target_link_options(sdengine_${id} PRIVATE
     "-Wl,-z,max-page-size=16384" "-Wl,--exclude-libs,ALL" "-Wl,-Bsymbolic")
   # id|label|description goes into the host library, escaped for a C string.

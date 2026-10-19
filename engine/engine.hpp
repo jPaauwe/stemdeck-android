@@ -34,10 +34,15 @@ struct InputStats
     bool hasPeak = false;
 };
 
+// This engine has SeparateOptions::computeThreads/gpu and compute_info().
+#define SDENGINE_HAS_COMPUTE 1
+
 struct SeparateOptions
 {
-    int threads = 3;            // chunks processed in parallel
+    int threads = 3;            // segments separated at once (memory bound)
     int chunkSeconds = 30;      // unused since segments are scheduled directly
+    int computeThreads = 0;     // threads doing maths, all segments together; 0 = all cores
+    bool gpu = true;            // use the GPU (Vulkan) for the large products
     // Which of the six sources to write, in kSourceNames order.
     std::array<bool, kNumSources> write{{true, true, true, true, true, true}};
 };
@@ -71,6 +76,10 @@ SeparateResult separate(const std::string &preparedPath,
                         const std::string &outDir,
                         const SeparateOptions &opts,
                         const ProgressFn &progress);
+
+// What the engine computes on: "10 cores, GPU: <name> (Vulkan 1.3)", or
+// why the GPU is not used. Starts the GPU if it has not been yet.
+std::string compute_info(const SeparateOptions &opts);
 
 // Asks a running separate()/prepare_input() to stop. Cleared when the next
 // call starts.

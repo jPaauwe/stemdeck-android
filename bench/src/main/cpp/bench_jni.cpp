@@ -47,6 +47,23 @@ jstring nCompare(JNIEnv *env, jclass, jstring a, jstring b)
     return env->NewStringUTF(sdbench::compare_outputs(str(env, a), str(env, b)).c_str());
 }
 
+#ifdef SDENGINE_HAS_COMPUTE
+int g_computeThreads = 0;
+bool g_gpu = true;
+
+// Threads doing maths (0 = all cores) and the GPU, for everything after.
+// Returns what that means on this phone.
+jstring nSetCompute(JNIEnv *env, jclass, jint threads, jboolean gpu)
+{
+    g_computeThreads = threads;
+    g_gpu = gpu == JNI_TRUE;
+    sdengine::SeparateOptions o;
+    o.computeThreads = g_computeThreads;
+    o.gpu = g_gpu;
+    return env->NewStringUTF(sdengine::compute_info(o).c_str());
+}
+#endif
+
 // Full separation with the engine's own chunked, multi-threaded path, as
 // the app runs it.
 jstring nSeparate(JNIEnv *env, jclass, jstring model, jstring song, jstring outDir,
@@ -58,6 +75,10 @@ jstring nSeparate(JNIEnv *env, jclass, jstring model, jstring song, jstring outD
     sdengine::SeparateOptions o;
     o.threads = threads;
     o.chunkSeconds = chunkSeconds;
+#ifdef SDENGINE_HAS_COMPUTE
+    o.computeThreads = g_computeThreads;
+    o.gpu = g_gpu;
+#endif
     const auto t0 = std::chrono::steady_clock::now();
     auto r = sdengine::separate(str(env, song), str(env, outDir), o,
                                 [](float, const char *) { return true; });
@@ -79,6 +100,9 @@ const JNINativeMethod kMethods[] = {
     {"nSeparate",
      "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;",
      (void *)nSeparate},
+#ifdef SDENGINE_HAS_COMPUTE
+    {"nSetCompute", "(IZ)Ljava/lang/String;", (void *)nSetCompute},
+#endif
 };
 } // namespace
 
