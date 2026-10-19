@@ -54,6 +54,25 @@ Options:
 The song is decoded and resampled once, with the reference build, so every
 build gets exactly the same input.
 
+## Listening
+
+After a run, tap **Listen** to hear what the builds produced. The last run is
+kept, so you can come back to it later, until you start a new one.
+
+- **Stem:** drums, bass, other, vocals, guitar, piano, all stems together, or
+  the original song.
+- **Build:** tap another build while it plays. It switches at the same moment
+  in the song, with a short crossfade, so you compare the same notes. Each
+  build shows how far its stem is from the reference (SNR in dB).
+- **Hear only the difference:** plays this build minus the reference, so you
+  hear exactly what changed. Silence means they're the same. *Boost* raises it
+  by 12 dB for quiet differences.
+- **Where they differ most:** for each build, the second where its stem is
+  furthest from the reference. Tap it to jump there and loop those 4 seconds.
+- **Loop 5 s**, **−5 s** and **+5 s**, and a seek bar.
+- **Blind test:** hides and shuffles the build names (A, B, C…). Pick the one
+  you prefer, then tap **Reveal**.
+
 ## How it is built
 
 The engine builds come from git: at build time,
@@ -67,7 +86,9 @@ Each engine version is compiled into its own library,
 `engine.cpp`), which exports only a small C API (`sdp_load_model`,
 `sdp_prepare`, `sdp_separate`, `sdp_cancel`…). `compare_jni.cpp` loads one
 version at a time with `dlopen`, runs it, unloads it, and computes the
-differences between the WAV files the versions write.
+differences between the WAV files the versions write. The Listen screen
+(`ListenActivity.kt`) plays those WAV files through `StemPlayer.kt`, an
+AudioTrack player that can switch source mid-stream.
 
 Building it needs Python 3 and the full git history with tags:
 

@@ -54,6 +54,7 @@ class CompareActivity : Activity() {
     private lateinit var saveStems: CheckBox
     private lateinit var runBtn: Button
     private lateinit var cancelBtn: Button
+    private lateinit var listenBtn: Button
     private val engineBoxes = mutableListOf<Pair<EngineInfo, CheckBox>>()
     private val report = StringBuilder()
     private var songUri: Uri? = null
@@ -128,8 +129,14 @@ class CompareActivity : Activity() {
             text = "Cancel"; isEnabled = false
             setOnClickListener { cancelled = true; Host.nCancel(); out("Cancelling…") }
         }
+        listenBtn = Button(this).apply {
+            text = "Listen"
+            isEnabled = ListenActivity.hasResults(this@CompareActivity)
+            setOnClickListener { startActivity(Intent(this@CompareActivity, ListenActivity::class.java)) }
+        }
         buttons.addView(runBtn)
         buttons.addView(cancelBtn)
+        buttons.addView(listenBtn)
         buttons.addView(Button(this).apply { text = "Copy"; setOnClickListener { copy() } })
         buttons.addView(Button(this).apply { text = "Share"; setOnClickListener { share() } })
         root.addView(buttons)
@@ -250,6 +257,7 @@ class CompareActivity : Activity() {
         runBtn.isEnabled = false; cancelBtn.isEnabled = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         report.clear()
+        listenBtn.isEnabled = false
         thread(name = "compare") {
             try {
                 run(uri, order, ref, threads, cool, save)
@@ -262,6 +270,7 @@ class CompareActivity : Activity() {
                 running = false
                 runOnUiThread {
                     runBtn.isEnabled = true; cancelBtn.isEnabled = false
+                    listenBtn.isEnabled = ListenActivity.hasResults(this)
                     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
             }
@@ -287,7 +296,7 @@ class CompareActivity : Activity() {
         checkCancel()
 
         // Decode the song once, prepare it with the reference build.
-        val work = File(getExternalFilesDir(null) ?: filesDir, "compare").apply { deleteRecursively(); mkdirs() }
+        val work = ListenActivity.workDir(this).apply { deleteRecursively(); mkdirs() }
         val input = File(work, "input.${songName.substringAfterLast('.', "mp3")}")
         contentResolver.openInputStream(uri)!!.use { s -> input.outputStream().use { s.copyTo(it, 1 shl 16) } }
         out("Decoding $songName …")
@@ -340,6 +349,9 @@ class CompareActivity : Activity() {
                 up?.let { "%.2fx".format(it) } ?: "-", r.peakGb, r.thermalStart, r.thermalEnd))
         }
 
+        // What the Listen screen needs: the builds, and where each differs.
+        val diffs = JSONObject()
+
         // ─── differences vs reference ───
         if (refRes != null && results.size > 1) {
             out("\nDIFFERENCE FROM ${ref.label.uppercase()} (SNR in dB; >60 identical, 40–60 inaudible, 20–40 small, <20 clearly different)")
@@ -348,6 +360,7 @@ class CompareActivity : Activity() {
             for (r in results) {
                 if (r === refRes) continue
                 val d = JSONObject(Host.nDiff(refRes.dir.path, r.dir.path))
+                diffs.put(r.engine.id, d)
                 val stems = d.getJSONArray("stems")
                 val cells = (0 until stems.length()).map { stems.getJSONObject(it) }
                 out("  %-14s ".format(r.engine.label.take(14)) +
@@ -386,12 +399,28 @@ class CompareActivity : Activity() {
                 (0 until stems.length()).joinToString(" ") { "%7.1f".format(stems.getJSONObject(it).getDouble("rms_db")) })
         }
 
+        writeRunInfo(work, results, refRes?.engine ?: ref, songSeconds, diffs)
+
         if (save) {
             out("\nSaving stems to Downloads/StemDeck Compare …")
             for (r in results) saveToDownloads(r)
             out("  saved")
         }
-        out("\nDone. Tap Copy to share these results.")
+        out("\nDone. Tap Listen to hear the builds side by side, or Copy to share these results.")
+    }
+
+    private fun writeRunInfo(work: File, results: List<Result>, ref: EngineInfo, songSeconds: Double, diffs: JSONObject) {
+        val o = JSONObject()
+            .put("song", songName)
+            .put("seconds", songSeconds)
+            .put("ref", ref.id)
+            .put("engines", org.json.JSONArray().apply {
+                for (r in results) put(JSONObject()
+                    .put("id", r.engine.id).put("label", r.engine.label)
+                    .put("description", r.engine.description).put("seconds", r.seconds))
+            })
+            .put("diffs", diffs)
+        File(work, ListenActivity.RUN_INFO).writeText(o.toString())
     }
 
     private fun coolDown() {
