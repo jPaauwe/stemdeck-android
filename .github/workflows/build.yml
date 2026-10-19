@@ -3,8 +3,6 @@ name: Build
 on:
   push:
     branches: [main]
-    # A tag v1.2.3 builds and publishes the public release 1.2.3.
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -189,8 +187,17 @@ jobs:
           fi
           echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
       - name: Version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; fi
+          # VERSION names the next public release. Until a release v<VERSION>
+          # exists, a push to main builds it; after that, development builds.
+          v=$(cat VERSION)
+          if [ "${{ github.event_name }}" = push ] && ! gh release view "v$v" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "APP_VERSION=$v" >> "$GITHUB_ENV"
+          else
+            echo "APP_VERSION=$v-dev.${{ github.run_number }}" >> "$GITHUB_ENV"
+          fi
       - name: Build
         env:
           SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
@@ -230,7 +237,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: RELEASE_NOTES.md
+          sparse-checkout: |
+            RELEASE_NOTES.md
+            VERSION
           sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
@@ -239,11 +248,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            # The public release: the app only.
-            gh release create "$GITHUB_REF_NAME" StemDeck-Android.apk \
+          v=$(cat VERSION)
+          if ! gh release view "v$v" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            # The public release v<VERSION>: the app only, tagged at this commit.
+            gh release create "v$v" StemDeck-Android.apk \
               --repo "${{ github.repository }}" \
-              --title "StemDeck for Android ${GITHUB_REF_NAME#v}" \
+              --target "${{ github.sha }}" \
+              --title "StemDeck for Android $v" \
               --notes-file RELEASE_NOTES.md \
               --latest
           else

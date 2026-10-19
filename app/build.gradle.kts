@@ -13,7 +13,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        // A release tag v1.2.3 builds version 1.2.3 (see .github/workflows/build.yml).
+        // VERSION, or VERSION-dev.N for development builds (see .github/workflows/build.yml).
         versionName = System.getenv("APP_VERSION")?.ifEmpty { null } ?: "1.0.0-dev"
 
         ndk {

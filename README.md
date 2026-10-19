@@ -19,8 +19,10 @@ StemDeck project.
    Demucs' `htdemucs_6s` weights in demucs.cpp's format (bit for bit the
    weights Demucs v4.1.0 publishes; CI checks this).
 
-Releases are tagged `v1.0.0`, `v1.0.1`, … Each push to `main` also builds a
-development release (marked pre-release), with the two benchmark apps. With the signing key
+Public releases are `v1.0.0`, `v1.0.1`, …: the version in `VERSION`. The
+first push to `main` after `VERSION` changes builds and publishes that
+release (the app only, with `RELEASE_NOTES.md`); other pushes publish
+development builds as pre-releases, with the two benchmark apps. With the signing key
 in the repository secrets (see `signing/README.md`), every build is signed with
 the same key, so a new APK installs over the old one and keeps your library.
 
