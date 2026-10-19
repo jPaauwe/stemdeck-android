@@ -12,14 +12,15 @@ StemDeck project.
 
 1. On your phone, download
    [`StemDeck-Android.apk`](https://github.com/jPaauwe/stemdeck-android/releases/latest/download/StemDeck-Android.apk)
-   from the newest release (or open the repository's **Releases** page and tap
-   it there).
+   from the latest release (or open the repository's **Releases** page and
+   tap it there). Requires Android 10 or newer on a 64-bit (arm64) phone.
 2. Allow your browser to install apps when Android asks (one time).
 3. Open StemDeck. The first separation downloads the model (about 55 MB):
-   Demucs v4.1.0's `htdemucs_6s` weights, from the Demucs project's own
-   HuggingFace repository.
+   Demucs' `htdemucs_6s` weights in demucs.cpp's format (bit for bit the
+   weights Demucs v4.1.0 publishes; CI checks this).
 
-Each push to `main` builds and publishes a new release. With the signing key
+Releases are tagged `v1.0.0`, `v1.0.1`, … Each push to `main` also builds a
+development release (marked pre-release), with the two benchmark apps. With the signing key
 in the repository secrets (see `signing/README.md`), every build is signed with
 the same key, so a new APK installs over the old one and keeps your library.
 
@@ -47,7 +48,7 @@ the same key, so a new APK installs over the old one and keeps your library.
 | Desktop StemDeck | This app |
 |---|---|
 | Python/FastAPI server | Kotlin server on `127.0.0.1` inside the app (`LocalServer.kt`), same API shape for the parts the mobile UI uses |
-| PyTorch Demucs v4.1.0, `htdemucs_6s` | [demucs.cpp](https://github.com/sevagh/demucs.cpp), a C++ implementation of the same model, compiled for arm64 and optimized for phones (`engine/`). It reads the weights file Demucs v4.1.0 publishes ([adefossez/HTDemucs-6s](https://huggingface.co/adefossez/HTDemucs-6s), `5c90dfd2.safetensors`) as is |
+| PyTorch Demucs `htdemucs_6s` | [demucs.cpp](https://github.com/sevagh/demucs.cpp), a C++ implementation of the same model and weights, compiled for arm64 and optimized for phones (`engine/`) |
 | FFmpeg decode | Android's built-in decoders (`AudioDecoder.kt`) and a windowed-sinc resampler to 44.1 kHz |
 | Mobile web UI (`static/mobile`) | The same UI, bundled in `app/src/main/assets/web` and shown in a WebView. Changes are marked `Android:` |
 | pyloudnorm | The same BS.1770 K-weighting and gating in C++ |
@@ -60,9 +61,9 @@ phone's memory), so memory stays flat however long the song is.
 
 ## Speed
 
-Separation is the slow part. The app's engine is **Demucs v4.1.0 with every
-optimization so far**: Demucs' own segments over the whole song, faster
-attention, convolutions, normalization and GELU, convolutions that need a
+Separation is the slow part. The app's engine is the one from development
+build 24 (`engines/b13plus`): Demucs' own segments over the whole song,
+faster attention, convolutions and normalization, convolutions that need a
 third of the memory, and **every core and the GPU**:
 
 - **Every core:** the segments that fit in memory run side by side, and the
@@ -90,12 +91,12 @@ Two separate apps measure the engines on the phone itself. Each release has
 both:
 
 - **[StemDeck Bench](bench/README.md)**
-  ([download the latest](https://github.com/jPaauwe/stemdeck-android/releases/latest/download/StemDeck-Bench.apk)) profiles the
+  (in the development releases) profiles the
   engines: the original demucs.cpp, builds 4–10 and the app's engine, where
   the time goes per stage and per operation, and how speed and memory scale
   with threads.
 - **[StemDeck Compare](compare/README.md)**
-  ([download the latest](https://github.com/jPaauwe/stemdeck-android/releases/latest/download/StemDeck-Compare.apk)) runs
+  (in the development releases) runs
   your own song through the original demucs.cpp, builds 4–10, build 13 and
   the app's engine,
   compares their speed, memory and stems, and lets you listen to them side
@@ -138,8 +139,8 @@ installs them on first sync). StemDeck Compare also needs Python 3.
   (`layers.cpp`) and `demucs_inference_normalized` (`model_apply.cpp`).
   Results match the original to float rounding. Each change is marked
   "StemDeck Android". The unmodified original is in `engines/original`.
-- Demucs v4.1.0 ([adefossez/demucs](https://github.com/adefossez/demucs)) and
-  the `htdemucs_6s` weights: MIT, © Meta Platforms.
+- Demucs ([adefossez/demucs](https://github.com/adefossez/demucs)) and the
+  `htdemucs_6s` weights: MIT, © Meta Platforms.
 - Eigen: MPL 2.0. NanoHTTPD: BSD 3-Clause.
 - [LAME](https://lame.sourceforge.io) 3.100, the MP3 encoder and decoder:
   LGPL 2.0 or later. It is not stored in this repository: the build downloads

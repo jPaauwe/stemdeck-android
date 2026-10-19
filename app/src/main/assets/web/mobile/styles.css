@@ -75,6 +75,10 @@ button {
   overflow-y: auto;
   padding: calc(var(--safe-top) + 14px) 0 calc(var(--tabbar-h) + var(--safe-bottom) + 16px);
 }
+/* Android: room for the mini player (60px + 8px gap + 8px) above the tab bar. */
+.has-mini .screen {
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 16px + 76px);
+}
 .pad {
   padding-left: 20px;
   padding-right: 20px;

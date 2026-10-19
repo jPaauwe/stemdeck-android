@@ -6,5 +6,5 @@ b4|builds 4–10|The first released engine: 24 s chunks, transposed convolutions
 b12|build 12|Faster norms, GLU, layer scale, attention and stride-1 convolutions (same output)|no
 b13|build 13|Demucs' own 7.8 s segments over the whole song with a time shift, plus build 12's speed-ups|yes
 b14|build 14|Build 13 plus vectorized GELU and blocked layout transposes (same output)|no
-b13plus|build 13 + cores + GPU|Build 13 using every core and the GPU (Vulkan)|no
-v41|v4.1.0 + all optimizations|Demucs v4.1.0's weights and every optimization so far: all cores, GPU, build 14's speed-ups. The app's engine|yes
+b13plus|build 13 + cores + GPU|Build 13 using every core and the GPU (Vulkan). The app's engine|yes
+v41|v4.1.0 + all optimizations|Demucs v4.1.0's weights and every optimization so far: all cores, GPU, build 14's speed-ups|yes

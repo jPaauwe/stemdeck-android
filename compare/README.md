@@ -6,8 +6,8 @@ how fast each one is, how much memory it needs, and how different its stems
 are. Use it to check that a speed-up didn't change the sound, or to hear what
 did change.
 
-**Download:** [`StemDeck-Compare.apk`](https://github.com/jPaauwe/stemdeck-android/releases/latest/download/StemDeck-Compare.apk)
-from the newest release. It installs next to StemDeck and doesn't touch its
+**Download:** [`StemDeck-Compare.apk`](https://github.com/jPaauwe/stemdeck-android/releases)
+from the newest development release (pre-release); it is not part of the public releases. It installs next to StemDeck and doesn't touch its
 library.
 
 ## Running it
@@ -16,7 +16,8 @@ library.
    Any audio format Android can decode works.
 2. Tick the engines to compare: the **original demucs.cpp** (upstream,
    unmodified), **builds 4–10** (the first released StemDeck engine),
-   **build 13**, and **v4.1.0 + all optimizations** (the app's engine).
+   **build 13**, **build 13 + cores + GPU** (the app's engine) and
+   **v4.1.0 + all optimizations**.
    See [`engines/`](../engines/README.md).
 3. Pick the **reference** that the others are compared with (it always runs
    first; the original by default) and the number of **threads**. The

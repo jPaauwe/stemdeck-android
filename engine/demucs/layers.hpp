@@ -10,7 +10,6 @@
 #include <iostream>
 #include <vector>
 #include <unsupported/Eigen/CXX11/Tensor>
-#include <unsupported/Eigen/SpecialFunctions>
 
 namespace demucscpp
 {
@@ -65,21 +64,22 @@ inline Eigen::Tensor3dXf gelu(const Eigen::Tensor3dXf &x)
         { return 0.5f * a * (1.0f + std::erf(a / std::sqrt(2.0f))); });
 }
 
-// StemDeck Android: the same GELU, vectorized, in chunks over every core.
+// StemDeck Android: the same GELU, in chunks over every core.
 inline Eigen::MatrixXf gelu(const Eigen::MatrixXf &x)
 {
     SD_PROF("gelu");
-    // Eigen's vectorized erf, in chunks over every core.
     Eigen::MatrixXf y(x.rows(), x.cols());
     const Eigen::Index n = x.size();
     const Eigen::Index chunk = 1 << 16;
     const float *xp = x.data();
     float *yp = y.data();
     sdpool::parallel_for(static_cast<int>((n + chunk - 1) / chunk), [&](int t) {
-        const Eigen::Index i0 = t * chunk, len = std::min(n, i0 + chunk) - i0;
-        Eigen::Map<const Eigen::ArrayXf> a(xp + i0, len);
-        Eigen::Map<Eigen::ArrayXf> o(yp + i0, len);
-        o = 0.5f * a * (1.0f + (a * 0.70710678118654752f).erf());
+        const Eigen::Index i1 = std::min(n, (t + 1) * chunk);
+        for (Eigen::Index i = t * chunk; i < i1; ++i)
+        {
+            const float a = xp[i];
+            yp[i] = 0.5f * a * (1.0f + std::erf(a / std::sqrt(2.0f)));
+        }
     });
     return y;
 }

@@ -3,6 +3,8 @@ name: Build
 on:
   push:
     branches: [main]
+    # A tag v1.2.3 builds and publishes the public release 1.2.3.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -133,8 +135,7 @@ jobs:
         run: |
           pip install --quiet numpy pyloudnorm
           set -o pipefail
-          # With Demucs v4.1.0's own weights file, as the app loads it.
-          python3 scripts/engine_test.py build/engine/sdengine_cli model-v41/htdemucs_6s.safetensors build/engine-test 2>&1 | tee engine-test.log
+          python3 scripts/engine_test.py build/engine/sdengine_cli model/htdemucs-6s.bin build/engine-test 2>&1 | tee engine-test.log
       - name: Benchmark one segment, builds 4-10 vs the app engine (CI host)
         run: |
           set -o pipefail
@@ -187,6 +188,9 @@ jobs:
               -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=throwaway"
           fi
           echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: Version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"; fi
       - name: Build
         env:
           SIGNING_KEYSTORE_PASSWORD: ${{ secrets.SIGNING_KEYSTORE_PASSWORD }}
@@ -224,6 +228,10 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: RELEASE_NOTES.md
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           name: StemDeck-Android
@@ -231,9 +239,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="build-${{ github.run_number }}"
-          gh release create "$tag" StemDeck-Android.apk StemDeck-Bench.apk StemDeck-Compare.apk \
-            --repo "${{ github.repository }}" \
-            --title "StemDeck for Android, build ${{ github.run_number }}" \
-            --notes "Built from ${{ github.sha }}. Open this page on your phone and tap StemDeck-Android.apk to install. StemDeck-Bench.apk is the separate benchmark app. StemDeck-Compare.apk runs a song through several engine builds and compares them." \
-            --latest
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            # The public release: the app only.
+            gh release create "$GITHUB_REF_NAME" StemDeck-Android.apk \
+              --repo "${{ github.repository }}" \
+              --title "StemDeck for Android ${GITHUB_REF_NAME#v}" \
+              --notes-file RELEASE_NOTES.md \
+              --latest
+          else
+            # Development builds, with the benchmark apps.
+            tag="build-${{ github.run_number }}"
+            gh release create "$tag" StemDeck-Android.apk StemDeck-Bench.apk StemDeck-Compare.apk \
+              --repo "${{ github.repository }}" \
+              --title "StemDeck for Android, development build ${{ github.run_number }}" \
+              --notes "Development build from ${{ github.sha }}. StemDeck-Android.apk is the app; StemDeck-Bench.apk benchmarks the separation engine; StemDeck-Compare.apk runs a song through several engine builds and compares them." \
+              --prerelease
+          fi

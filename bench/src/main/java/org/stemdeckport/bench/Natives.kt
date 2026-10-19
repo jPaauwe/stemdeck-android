@@ -13,7 +13,7 @@ interface EngineNative {
     fun separate(model: String, song: String, outDir: String, threads: Int, chunkSeconds: Int): String
 }
 
-/** The app's engine (Demucs v4.1.0 + every optimization, incl. all cores and GPU), with per-operation profiling. */
+/** The app's engine (build 13 + every core + GPU, from build 24), with per-operation profiling. */
 object OptNative : EngineNative {
     init { System.loadLibrary("sdbench_opt") }
     override val key = "app"

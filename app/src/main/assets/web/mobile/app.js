@@ -814,7 +814,11 @@ function render() {
   let screen = mixerScreen();
   if (state.tab === "library") screen = libraryScreen();
   else if (state.tab === "extract") screen = extractScreen();
-  app.innerHTML = screen + miniPlayer() + tabBar();
+  const mini = miniPlayer();
+  // Android: the screens leave room for the mini player too while it shows,
+  // so it does not cover the last item (e.g. the Extract stems button).
+  app.classList.toggle("has-mini", mini !== "");
+  app.innerHTML = screen + mini + tabBar();
   _lastPlayedBar = -1; // bars were just rebuilt; force a repaint on next tick
   wireFaders();
   wireSwipe();

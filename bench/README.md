@@ -5,8 +5,8 @@ A separate Android app that measures how fast
 and where the time goes. It installs next to StemDeck and doesn't touch its
 library.
 
-**Download:** [`StemDeck-Bench.apk`](https://github.com/jPaauwe/stemdeck-android/releases/latest/download/StemDeck-Bench.apk)
-from the newest release. To compare the engine *builds* on a song of your own,
+**Download:** [`StemDeck-Bench.apk`](https://github.com/jPaauwe/stemdeck-android/releases)
+from the newest development release (pre-release); it is not part of the public releases. To compare the engine *builds* on a song of your own,
 use [StemDeck Compare](../compare/README.md) instead.
 
 ## Running it
@@ -27,8 +27,8 @@ The app contains three engines (see [`engines/`](../engines/README.md)):
 
 - **original demucs.cpp**: upstream, unmodified (`engines/original`),
 - **builds 4–10**: the first released StemDeck engine (`engines/b4`),
-- **app engine**: the engine the app uses now (`/engine`): Demucs v4.1.0
-  with every optimization so far, including every core and the GPU.
+- **app engine**: the engine the app uses now (`/engine`, the one from
+  build 24): build 13 using every core and the GPU.
 
 The report starts with what the app's engine runs on, for example
 `10 cores, GPU: Samsung Xclipse 940 (Vulkan 1.3)`, or why the GPU is not

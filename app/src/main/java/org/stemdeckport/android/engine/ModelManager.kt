@@ -9,34 +9,25 @@ import java.security.MessageDigest
 import java.util.concurrent.CancellationException
 
 /**
- * The htdemucs_6s weights of Demucs v4.1.0, exactly as the Demucs project
- * publishes them on the HuggingFace hub (adefossez/HTDemucs-6s, checkpoint
- * 5c90dfd2, safetensors). Downloaded once on first use and checked against
- * a pinned SHA-256 before it is ever loaded; the engine reads the file as is.
+ * The htdemucs_6s weights in demucs.cpp's ggml format. Downloaded once on
+ * first use (desktop StemDeck does the same on its first launch) and checked
+ * against a pinned SHA-256 before it is ever loaded.
  */
 class ModelManager(context: Context) {
     companion object {
-        const val FILE_NAME = "htdemucs_6s-5c90dfd2-v4.1.0.safetensors"
+        const val FILE_NAME = "ggml-model-htdemucs-6s-f16.bin"
 
-        // Pinned to a revision of the repository, so the file cannot change under us.
+        // Pinned to a revision of the dataset, so the file cannot change under us.
         const val URL_STRING =
-            "https://huggingface.co/adefossez/HTDemucs-6s/resolve/" +
-                "3c5ee475be622df764938de97e4281a7b07ffa58/5c90dfd2.safetensors"
-        const val SHA256 = "d2a1745f0744721f6b8ca5bf469b67c651ea5ed1b52998cab033b2158609d411"
-
-        // The demucs.cpp conversion of the same weights that builds up to 24
-        // downloaded; removed once the v4.1.0 file is in place.
-        private const val OLD_FILE_NAME = "ggml-model-htdemucs-6s-f16.bin"
+            "https://huggingface.co/datasets/Retrobear/demucs.cpp/resolve/" +
+                "8f58ac0491bbea657275bcd3e38af1ab3a27bfc9/$FILE_NAME"
+        const val SHA256 = "09704f4ceae204e56e77d5eefd6ac71d7275be81fd507e6913371d59abcee856"
     }
 
     private val dir = File(context.filesDir, "models").apply { mkdirs() }
     val modelFile = File(dir, FILE_NAME)
 
-    fun isReady(): Boolean {
-        val ready = modelFile.isFile && modelFile.length() > 1_000_000
-        if (ready) File(dir, OLD_FILE_NAME).delete()
-        return ready
-    }
+    fun isReady(): Boolean = modelFile.isFile && modelFile.length() > 1_000_000
 
     /**
      * Returns the model file, downloading it first if needed. [onProgress]

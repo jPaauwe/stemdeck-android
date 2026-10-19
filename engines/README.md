@@ -12,10 +12,10 @@ them; `SOURCE.txt` in each folder says where it came from.
 | `b12` | 12 | Faster norms, GLU, layer scale, attention and stride-1 convolutions. Same output. | archived |
 | `b13` | 13, 20 | Demucs' own 7.8 s segments over the whole song with a time shift, as PyTorch Demucs does, plus build 12's speed-ups. | Compare |
 | `b14` | 14–19 | Build 13 plus vectorized GELU and blocked layout transposes. Same output. | archived |
-| `b13plus` | 23–24 | Build 13 using **every core and the GPU**: a shared thread pool splits the maths inside each segment over all cores, and Vulkan compute shaders run the transformer and the large convolution products on the GPU. Same output as build 13. | archived |
-| `v41` | 25 on | **Demucs v4.1.0 with every optimization so far**: build 13 + cores + GPU plus build 14's speed-ups, reading the weights file Demucs v4.1.0 publishes (`adefossez/HTDemucs-6s`, `5c90dfd2.safetensors`) directly. | **the app**, Compare, Bench |
+| `b13plus` | 23–24, 1.0.0 | Build 13 using **every core and the GPU**: a shared thread pool splits the maths inside each segment over all cores, and Vulkan compute shaders run the transformer and the large convolution products on the GPU. Same output as build 13. | **the app** (release 1.0.0), Compare, Bench |
+| `v41` | 25 | **Demucs v4.1.0 with every optimization so far**: build 13 + cores + GPU plus build 14's speed-ups, reading the weights file Demucs v4.1.0 publishes (`adefossez/HTDemucs-6s`, `5c90dfd2.safetensors`) directly. Also published on its own as the separation engine repository. | Compare |
 
-The app's engine is in `/engine` and is identical to `v41`.
+The app's engine is in `/engine` and is identical to `b13plus`.
 
 **About Demucs v4.1.0** ([adefossez/demucs](https://github.com/adefossez/demucs),
 July 2026): the model and how it is applied to a song (7.8 s segments, 25%
