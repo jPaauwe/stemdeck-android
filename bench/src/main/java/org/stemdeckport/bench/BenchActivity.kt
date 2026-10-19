@@ -259,7 +259,7 @@ class BenchActivity : Activity() {
         table(best.getJSONArray("ops"), opt, nameIdx = 0, msIdx = 2, callsIdx = 1)
 
         // 2. Full song through the real separation path.
-        out("\n2. Full ${songSeconds} s test song, as the app separates it (24 s chunks)")
+        out("\n2. Full ${songSeconds} s test song, as the app separates it")
         val song = File(work, "song.f32").path
         if (!OptNative.writeSong(song, songSeconds.toDouble())) throw IllegalStateException("could not write the test song")
         val runs = mutableListOf<Pair<EngineNative, Int>>()
