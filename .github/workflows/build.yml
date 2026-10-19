@@ -92,6 +92,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          # StemDeck Compare bundles every engine version from the build-* tags.
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -132,12 +134,14 @@ jobs:
         run: |
           cp app/build/outputs/apk/release/app-release.apk StemDeck-Android.apk
           cp bench/build/outputs/apk/release/bench-release.apk StemDeck-Bench.apk
+          cp compare/build/outputs/apk/release/compare-release.apk StemDeck-Compare.apk
       - uses: actions/upload-artifact@v4
         with:
           name: StemDeck-Android
           path: |
             StemDeck-Android.apk
             StemDeck-Bench.apk
+            StemDeck-Compare.apk
 
   release:
     name: Publish the APK
@@ -153,8 +157,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="build-${{ github.run_number }}"
-          gh release create "$tag" StemDeck-Android.apk StemDeck-Bench.apk \
+          gh release create "$tag" StemDeck-Android.apk StemDeck-Bench.apk StemDeck-Compare.apk \
             --repo "${{ github.repository }}" \
             --title "StemDeck for Android, build ${{ github.run_number }}" \
-            --notes "Built from ${{ github.sha }}. Open this page on your phone and tap StemDeck-Android.apk to install. StemDeck-Bench.apk is the separate benchmark app." \
+            --notes "Built from ${{ github.sha }}. Open this page on your phone and tap StemDeck-Android.apk to install. StemDeck-Bench.apk is the separate benchmark app. StemDeck-Compare.apk runs a song through several engine builds and compares them." \
             --latest

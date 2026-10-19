@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 rootProject.name = "StemDeckAndroid"
 include(":app")
 include(":bench")
+include(":compare")
