@@ -58,11 +58,25 @@ phone's memory), so memory stays flat however long the song is.
 
 ## Speed
 
-Separation is the slow part. The app uses the **build 13** engine: Demucs'
-own segments over the whole song, with faster attention, convolutions and
-normalization. On a 2-core test computer it separated a song about 4x faster
-than the original demucs.cpp (on 2 threads; the original uses 1), with the
-same output when given the same time shift.
+Separation is the slow part. The app's engine is **build 13** (Demucs' own
+segments over the whole song, with faster attention, convolutions and
+normalization), upgraded to use **every core and the GPU**:
+
+- **Every core:** the segments that fit in memory run side by side, and the
+  heavy maths inside each one (matrix products, attention, norms,
+  activations) is split into small pieces that any idle core picks up, so
+  the fast and slow cores of a phone chip each do what they can.
+- **GPU:** the transformer (projections, attention, feed-forward) and the
+  large convolution products run on the GPU through Vulkan
+  (`engine/compute/`). The GPU checks itself against the CPU on first use;
+  when it is missing, fails, or is busy with another segment, that work runs
+  on the CPU instead. *Processing* on the Extract screen switches the GPU
+  off (*CPU only*), and the progress line shows what a song is separated on.
+
+The results are the same as build 13's, to float rounding. On a 2-core test
+computer build 13 separated a song about 4x faster than the original
+demucs.cpp (on 2 threads; the original uses 1), with the same output when
+given the same time shift.
 Every earlier engine is kept in [`engines/`](engines/README.md), with the
 measurements. CI checks the engine on every push (`scripts/engine_test.py`
 and the host benchmark in `engine/test/bench_cli.cpp`): separation with the
@@ -78,7 +92,8 @@ both:
   with threads.
 - **[StemDeck Compare](compare/README.md)**
   ([download the latest](https://github.com/jPaauwe/stemdeck-android/releases/latest/download/StemDeck-Compare.apk)) runs
-  your own song through the original demucs.cpp, builds 4–10 and build 13,
+  your own song through the original demucs.cpp, builds 4–10, build 13 and
+  the app's engine,
   compares their speed, memory and stems, and lets you listen to them side
   by side.
 

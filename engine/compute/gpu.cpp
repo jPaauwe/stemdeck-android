@@ -95,7 +95,7 @@ struct Buffer
 };
 
 constexpr uint32_t kMaxSets = 512;
-constexpr size_t kPoolKeepBytes = size_t(512) << 20; // free buffers kept for reuse
+constexpr size_t kPoolKeepBytes = size_t(192) << 20; // free buffers kept for reuse (shared RAM on a phone)
 
 class Device
 {

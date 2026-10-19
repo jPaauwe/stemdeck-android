@@ -4,5 +4,6 @@ original|original demucs.cpp|Upstream demucs.cpp, unmodified: the whole song in 
 stage1|builds 1–3|The first port (never released): upstream plus whole-song normalization, 24 s chunks, ~1.7 GB per thread|no
 b4|builds 4–10|The first released engine: 24 s chunks, transposed convolutions rewritten to need ~0.6 GB per thread|yes
 b12|build 12|Faster norms, GLU, layer scale, attention and stride-1 convolutions (same output)|no
-b13|build 13|Demucs' own 7.8 s segments over the whole song with a time shift, plus build 12's speed-ups. The app's engine|yes
+b13|build 13|Demucs' own 7.8 s segments over the whole song with a time shift, plus build 12's speed-ups|yes
 b14|build 14|Build 13 plus vectorized GELU and blocked layout transposes (same output)|no
+b13plus|build 13 + cores + GPU|Build 13 using every core and the GPU (Vulkan). The app's engine|yes

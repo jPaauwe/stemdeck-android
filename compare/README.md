@@ -15,8 +15,9 @@ library.
 1. Tap **Choose MP3**, or share a song to StemDeck Compare from another app.
    Any audio format Android can decode works.
 2. Tick the engines to compare: the **original demucs.cpp** (upstream,
-   unmodified), **builds 4–10** (the first released StemDeck engine) and
-   **build 13** (the app's engine). See [`engines/`](../engines/README.md).
+   unmodified), **builds 4–10** (the first released StemDeck engine),
+   **build 13**, and **build 13 + cores + GPU** (the app's engine: build 13
+   using every core and the GPU). See [`engines/`](../engines/README.md).
 3. Pick the **reference** that the others are compared with (it always runs
    first; the original by default) and the number of **threads**. The
    original always uses 1 thread and holds the whole song in memory, so it

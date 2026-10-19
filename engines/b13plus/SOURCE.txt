@@ -1,0 +1,13 @@
+The app's engine since build 22: build 13 (engines/b13) upgraded to use
+every core and the GPU. Same maths and output as build 13, to float
+rounding.
+
+- compute/pool.*: a process-wide thread pool; the large products,
+  attention heads, norms and activations inside each segment are split
+  into chunks that any idle core takes.
+- compute/gpu.*, compute/shaders/: Vulkan compute (tiled matrix product,
+  column softmax), loaded at run time, self-tested against the CPU.
+- compute/gemm.*: one entry point for the large products: GPU when free,
+  else all cores.
+
+Files as in /engine at the commit that added this folder.

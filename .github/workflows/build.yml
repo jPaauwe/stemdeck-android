@@ -66,7 +66,7 @@ jobs:
       - name: Full separation, GPU against CPU (software GPU)
         run: |
           set -o pipefail
-          build/engine/sdbench_cli song gpu-song.f32 20 >/dev/null
+          build/engine/sdbench_cli song 20 gpu-song.f32
           mkdir -p out-gpu out-cpu
           { SD_GPU_ALLOW_CPU=1 build/engine/sdengine_cli separate model/htdemucs-6s.bin gpu-song.f32 out-gpu 2 24
             SD_NO_GPU=1 build/engine/sdengine_cli separate model/htdemucs-6s.bin gpu-song.f32 out-cpu 2 24

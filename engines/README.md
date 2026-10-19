@@ -10,10 +10,11 @@ them; `SOURCE.txt` in each folder says where it came from.
 | `stage1` | 1–3 (never released) | The first port: upstream plus whole-song normalization, the song split into 24 s chunks. About 1.7 GB per thread. | archived |
 | `b4` | 4–10 | The first released engine: as stage 1, with the transposed convolutions rewritten to need about 0.6 GB per thread. | Compare, Bench |
 | `b12` | 12 | Faster norms, GLU, layer scale, attention and stride-1 convolutions. Same output. | archived |
-| `b13` | 13 | Demucs' own 7.8 s segments over the whole song with a time shift, as PyTorch Demucs does, plus build 12's speed-ups. | **the app**, Compare, Bench |
-| `b14` | 14 | Build 13 plus vectorized GELU and blocked layout transposes. Same output. | archived |
+| `b13` | 13, 20 | Demucs' own 7.8 s segments over the whole song with a time shift, as PyTorch Demucs does, plus build 12's speed-ups. | Compare |
+| `b14` | 14–19 | Build 13 plus vectorized GELU and blocked layout transposes. Same output. | archived |
+| `b13plus` | 22 on | Build 13 using **every core and the GPU**: a shared thread pool splits the maths inside each segment over all cores, and Vulkan compute shaders run the transformer and the large convolution products on the GPU. Same output as build 13. | **the app**, Compare, Bench |
 
-The app's engine is in `/engine` and is identical to `b13`.
+The app's engine is in `/engine` and is identical to `b13plus`.
 
 ## How they compare
 

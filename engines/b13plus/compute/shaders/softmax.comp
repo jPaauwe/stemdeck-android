@@ -1,0 +1,56 @@
+// Softmax down each column of a column-major matrix: x[:, j] =
+// exp(x[:, j] - max) / sum. One 256-thread workgroup per column.
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) buffer BufX { float x[]; };
+
+layout(push_constant) uniform Params
+{
+    uint rows, cols, ld, off;
+} p;
+
+shared float red[256];
+
+void main()
+{
+    const uint j = gl_WorkGroupID.x + gl_WorkGroupID.y * 65535u;
+    if (j >= p.cols)
+        return;
+    const uint t = gl_LocalInvocationID.x;
+    const uint base = p.off + j * p.ld;
+
+    float mx = -3.402823e38;
+    for (uint i = t; i < p.rows; i += 256u)
+        mx = max(mx, x[base + i]);
+    red[t] = mx;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1u)
+    {
+        if (t < s)
+            red[t] = max(red[t], red[t + s]);
+        barrier();
+    }
+    mx = red[0];
+    barrier();
+
+    float sum = 0.0;
+    for (uint i = t; i < p.rows; i += 256u)
+    {
+        const float e = exp(x[base + i] - mx);
+        x[base + i] = e;
+        sum += e;
+    }
+    red[t] = sum;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1u)
+    {
+        if (t < s)
+            red[t] += red[t + s];
+        barrier();
+    }
+    const float inv = 1.0 / red[0];
+    for (uint i = t; i < p.rows; i += 256u)
+        x[base + i] *= inv;
+}
