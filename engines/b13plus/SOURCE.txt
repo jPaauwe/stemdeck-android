@@ -1,4 +1,4 @@
-The app's engine since build 22: build 13 (engines/b13) upgraded to use
+The app's engine since build 23: build 13 (engines/b13) upgraded to use
 every core and the GPU. Same maths and output as build 13, to float
 rounding.
 
