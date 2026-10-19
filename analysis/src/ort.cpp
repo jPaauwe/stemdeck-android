@@ -37,6 +37,8 @@ const OrtApi* api() {
         a->ReleaseStatus(st);
         throw std::runtime_error("ONNX Runtime: " + m);
     }
+    // ONNX Runtime's builds can send usage telemetry; the app sends nothing.
+    if (OrtStatus* st = a->DisableTelemetryEvents(env)) a->ReleaseStatus(st);
     g_env = env;
     g_api = a;
     g_handle = h;
