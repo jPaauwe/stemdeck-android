@@ -1,3 +1,4 @@
+#include "permute.hpp"
 #include "layers.hpp"
 #include "conv.hpp"
 #include "lstm.hpp"
@@ -79,13 +80,8 @@ demucscpp::group_norm_fused_gelu(const Eigen::Tensor3dXf &x,
 {
     SD_PROF("group norm + gelu");
     Eigen::Tensor3dXf y = demucscpp::group_norm(x, weight, bias, 1, eps);
-    float *p = y.data();
-    const size_t n = size_t(y.size());
-    for (size_t k = 0; k < n; ++k)
-    {
-        const float v = p[k];
-        p[k] = 0.5f * v * (1.0f + std::erf(v * 0.70710678118654752f));
-    }
+    Eigen::Map<Eigen::ArrayXf> a(y.data(), y.size());
+    a = 0.5f * a * (1.0f + (a * 0.70710678118654752f).erf());
     return y;
 }
 
@@ -547,13 +543,13 @@ void demucscpp::common_encoder_layer(
     // Swap the first and last dimensions to get a tensor with dimensions (B, C,
     // T)
     Eigen::array<int, 3> permute_dims_3 = {1, 2, 0};
-    Eigen::Tensor3dXf q_shuf = q.shuffle(permute_dims_3);
+    Eigen::Tensor3dXf q_shuf = demucscpp::permute3(q, permute_dims_3);
 
     // Normalize the output with norm_out/MyGroupNorm
     q = demucscpp::group_norm(q_shuf, norm_out_weight, norm_out_bias, 1, eps);
 
     Eigen::array<int, 3> permute_dims_4 = {0, 2, 1};
-    q_shuf = q.shuffle(permute_dims_4);
+    q_shuf = demucscpp::permute3(q, permute_dims_4);
 
     q = q_shuf;
 }

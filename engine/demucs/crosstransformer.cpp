@@ -1,3 +1,4 @@
+#include "permute.hpp"
 #include "crosstransformer.hpp"
 #include "layers.hpp"
 #include "model.hpp"
@@ -255,7 +256,7 @@ void demucscpp::apply_crosstransformer(
     Eigen::Tensor3dXf pos_embed_1d = create_sin_embedding(T2, C);
 
     // shuffle axes of xt from 0,1,2 to 0,2,1
-    Eigen::Tensor3dXf xt_shuf = xt.shuffle(Eigen::array<int, 3>{0, 2, 1});
+    Eigen::Tensor3dXf xt_shuf = demucscpp::permute3(xt, {0, 2, 1});
 
     xt = demucscpp::layer_norm(
              xt_shuf, model.crosstransformer->crosstransformer_norm_in_t_weight,
@@ -327,13 +328,13 @@ void demucscpp::apply_crosstransformer(
 
     // permute last two dims of xt
     Eigen::array<int, 3> permute_dims = {0, 2, 1};
-    Eigen::Tensor3dXf xt_ret = xt.shuffle(permute_dims);
+    Eigen::Tensor3dXf xt_ret = demucscpp::permute3(xt, permute_dims);
     xt = xt_ret;
 
     // for x, transform from shape (1, 2688, 512) to
     // (512, 8, 336)
 
     // first also permute x
-    Eigen::Tensor3dXf x_shuf = x.shuffle(permute_dims);
+    Eigen::Tensor3dXf x_shuf = demucscpp::permute3(x, permute_dims);
     x = x_shuf;
 }

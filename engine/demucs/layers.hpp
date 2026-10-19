@@ -9,6 +9,7 @@
 #include <iostream>
 #include <vector>
 #include <unsupported/Eigen/CXX11/Tensor>
+#include <unsupported/Eigen/SpecialFunctions>
 
 namespace demucscpp
 {
@@ -60,9 +61,10 @@ inline Eigen::Tensor3dXf gelu(const Eigen::Tensor3dXf &x)
 inline Eigen::MatrixXf gelu(const Eigen::MatrixXf &x)
 {
     SD_PROF("gelu");
-    return x.unaryExpr(
-        [](float a)
-        { return 0.5f * a * (1.0f + std::erf(a / std::sqrt(2.0f))); });
+    // StemDeck Android: Eigen's vectorized erf instead of std::erf per element.
+    Eigen::MatrixXf y(x.rows(), x.cols());
+    y.array() = 0.5f * x.array() * (1.0f + (x.array() * 0.70710678118654752f).erf());
+    return y;
 }
 
 inline Eigen::Tensor3dXf layer_scale(const Eigen::Tensor3dXf &x,
