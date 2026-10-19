@@ -47,6 +47,12 @@ class Job(
     var sectionsSource: String? = null
     /** Whether the sections stage runs for this song, chosen at import (desktop's auto_sections). */
     var autoSections: Boolean = false
+    /** Android 1.3: lyrics kept beside the song (lyrics.json), as desktop's has_lyrics. */
+    var hasLyrics: Boolean = false
+    /** The file's own tags (title, artist, album), as desktop's audio_tags. */
+    var audioTags: Map<String, String> = emptyMap()
+    /** Artist/title/album the user typed in the Lyrics tab, used for lookups instead of the tags. */
+    var lyricsQuery: JSONObject? = null
     /** Desktop's on-demand lead/backing split: "none", "running", "done" or "error". */
     var vocalSplit: String = "none"
     /** Seconds per stage, as desktop records them (#293). */
@@ -83,7 +89,9 @@ class Job(
         put("source_url", sourceUrl)
         put("source_format", JSONObject.NULL)
         put("has_video", false)
-        put("has_lyrics", false)
+        put("has_lyrics", hasLyrics)
+        put("audio_tags", JSONObject(audioTags as Map<*, *>))
+        put("lyrics_query", lyricsQuery ?: JSONObject.NULL)
         put("error", error ?: JSONObject.NULL)
         put("compute_device", computeDevice)
         put("trashed_at", trashedAt ?: JSONObject.NULL)
@@ -141,6 +149,11 @@ class Job(
             job.analysisNotes = o.optJSONObject("analysis_notes")?.let { n ->
                 n.keys().asSequence().associateWith { n.getString(it) }
             } ?: emptyMap()
+            job.hasLyrics = o.optBoolean("has_lyrics", false)
+            job.audioTags = o.optJSONObject("audio_tags")?.let { t ->
+                t.keys().asSequence().associateWith { t.optString(it) }
+            } ?: emptyMap()
+            job.lyricsQuery = o.optJSONObject("lyrics_query")
             // A split cut short by the app being closed is not still running.
             job.vocalSplit = o.optString("vocal_split", "none").let { if (it == "running") "none" else it }
             job.sections = o.optJSONArray("sections")

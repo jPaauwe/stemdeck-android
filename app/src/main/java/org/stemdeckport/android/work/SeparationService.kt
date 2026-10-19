@@ -229,8 +229,13 @@ class SeparationService : Service() {
             analyzeKey(id, stemsDir, notes, ::set, beatEnd)
             lap("key")
             if (withSections) {
-                analyzeSections(id, stemsDir, notes, ::set, stopped, 0.77, 0.93)
+                analyzeSections(id, stemsDir, notes, ::set, stopped, 0.77, 0.92)
                 lap("sections")
+            }
+            // Lyrics (1.3): only when the user turned the lookup on (Settings, Network).
+            if (app.settings.lyricsLookup) {
+                lookUpLyrics(id, notes, ::set, stopped, 0.92)
+                lap("lyrics")
             }
             store.update(id) { it.analysisNotes = notes }
             for (s in NativeEngine.SOURCES) if (s !in written) File(stemsDir, "$s.wav").delete()
@@ -331,6 +336,35 @@ class SeparationService : Service() {
                 is OutOfMemoryError -> "the phone ran out of memory."
                 else -> (e.message ?: e.javaClass.simpleName) + "."
             }
+        }
+    }
+
+    /**
+     * Lyrics from LRCLIB for the song's artist/title/album/length (desktop's
+     * lookup at import, its useful core). Best-effort, within 30 s.
+     */
+    private fun lookUpLyrics(
+        id: String, notes: MutableMap<String, String>,
+        set: (String, String, Double, Boolean) -> Unit, stopped: () -> Boolean, at: Double,
+    ) {
+        try {
+            val job = app.store.get(id) ?: return
+            val query = app.lyrics.query(job)
+            if (query == null) {
+                notes["lyrics"] = "No lyrics: the file names no song to look up (add the title in the Lyrics tab)."
+                return
+            }
+            set("analyzing", "Looking up the lyrics", at, true)
+            val answer = org.stemdeckport.android.data.LrcLib.lookup(query, org.stemdeckport.android.data.LrcLib.http(app.userAgent), stopped)
+            if (stopped()) throw CancellationException()
+            if (answer == null || !app.lyrics.keep(id, answer)) {
+                notes["lyrics"] = "No lyrics: LRCLIB has none for “${query.artist.ifBlank { "?" }} – ${query.track}”."
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "lyrics lookup failed for $id", e)
+            notes["lyrics"] = "No lyrics: LRCLIB could not be reached (${e.message ?: e.javaClass.simpleName})."
         }
     }
 

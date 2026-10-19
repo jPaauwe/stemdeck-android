@@ -14,6 +14,8 @@ import { PITCH_MAX, PITCH_MIN, clampPitch } from "../js/pitchBus.js";
 import { createPlaybackContext } from "../js/audioContext.js";
 // Android: the click track, desktop's own scheduler (static/js/metronome.js, unchanged).
 import { createMetronome, computeCountIn } from "../js/metronome.js";
+// Android: desktop's LRC reading (static/js/lyricsLookup.js, verbatim) for the Lyrics view.
+import { parseLrc, wordTimings, currentLineIndex, shiftLines, clampOffset } from "../js/lyricsLookup.js";
 // Per-stem label + color, keyed by the backend stem name. Unknown names fall
 // back to a rotating palette so non-standard models still render sensibly.
 const STEM_META = {
@@ -65,6 +67,8 @@ function ensureAudioCtx() {
 
 
 const ICON = {
+  // Android: Settings.
+  gear: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   chevron: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   dots: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
   prev: '<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6v12M19 6l-9 6 9 6z"/></svg>',
@@ -112,6 +116,7 @@ fetch("/api/settings").then((r) => r.json()).then((s) => {
   // Android: as desktop's wireAutoSectionsToggle, a sections choice left on by
   // an earlier session does not survive into this one.
   if (s && s.auto_sections) saveAutoSections(false);
+  if (s && typeof s.lyrics_lookup === "boolean") state.lyricsLookup = s.lyrics_lookup;
   render();
 }).catch(() => {});
 // Android: which models the first song will download (the Extract screen says so).
@@ -154,6 +159,7 @@ const state = {
   // off at every start and after each import, as on desktop).
   autoSections: false,
   loopSection: null, // Android: id of the section the transport loops, or null
+  lyricsLookup: false, // Android: Settings > Network, off until turned on
 };
 
 let extractES = null; // EventSource for the active extraction
@@ -365,6 +371,212 @@ function setSectionLoop(sec) {
   render();
 }
 
+// ── Android: lyrics (LRCLIB, Settings > Network) ──
+// The kept version comes from GET /api/jobs/{id}/lyrics; the view highlights
+// the line being sung with desktop's parseLrc/wordTimings, wipes its words,
+// seeks on a tap, and keeps a timing offset (desktop's offset_sec).
+
+function lyricsState(data, status) {
+  const entry = status === 200 ? data : null;
+  const others = Array.isArray(data?.others) ? data.others : [];
+  const offset = clampOffset(entry?.offset_sec);
+  const lines = entry?.synced ? parseLrc(entry.synced) : [];
+  return { loading: false, entry, others, offset, lines, error: null, disabled: false };
+}
+
+function loadLyrics(id, token) {
+  state.current.lyrics = { loading: true, entry: null, others: [], lines: [], offset: 0 };
+  fetch(`/api/jobs/${id}/lyrics`, { cache: "no-store" })
+    .then(async (r) => ({ status: r.status, data: await r.json().catch(() => ({})) }))
+    .then(({ status, data }) => {
+      if (token !== engineToken || !state.current) return;
+      state.current.lyrics = lyricsState(data, status);
+      if (state.mixerView === "lyrics") render();
+    })
+    .catch(() => {
+      if (token !== engineToken || !state.current) return;
+      state.current.lyrics = { loading: false, entry: null, others: [], lines: [], offset: 0, error: "Couldn't load the lyrics." };
+    });
+}
+
+function lyricsQueryFields() {
+  const d = state.current?.detail || {};
+  const q = d.lyricsQuery || {};
+  const tags = d.audioTags || {};
+  let artist = q.artist ?? tags.artist ?? "";
+  let title = q.title ?? tags.title ?? "";
+  if (!title) {
+    const t = state.current?.title || "";
+    const m = /^(.+?)\s+[\p{Pd}]\s+(.+)$/u.exec(t);
+    if (m) { artist = artist || m[1]; title = m[2]; } else title = t;
+  }
+  return { artist, title };
+}
+
+async function lookUpLyrics(withFields) {
+  const c = state.current;
+  if (!c) return;
+  const body = {};
+  if (withFields) {
+    body.artist = (app.querySelector("[data-ly-artist]")?.value || "").trim();
+    body.title = (app.querySelector("[data-ly-title]")?.value || "").trim();
+    if (!body.title) { toast("Type the song's title first."); return; }
+    c.detail = { ...c.detail, lyricsQuery: { artist: body.artist, title: body.title } };
+  }
+  c.lyrics = { ...(c.lyrics || {}), loading: true, error: null };
+  render();
+  try {
+    const r = await fetch(`/api/jobs/${c.id}/lyrics/lookup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (state.current !== c) return;
+    if (r.status === 403) c.lyrics = { ...lyricsState({}, 404), disabled: true };
+    else if (r.status === 502) c.lyrics = { ...lyricsState({}, 404), error: "LRCLIB could not be reached. Try again later." };
+    else c.lyrics = lyricsState(data, r.status);
+  } catch (e) {
+    c.lyrics = { ...lyricsState({}, 404), error: "LRCLIB could not be reached. Try again later." };
+  }
+  render();
+}
+
+async function chooseLyrics(id) {
+  const c = state.current;
+  const r = await fetch(`/api/jobs/${c.id}/lyrics/choose`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lrclib_id: Number(id) }) });
+  const data = await r.json().catch(() => ({}));
+  if (state.current !== c) return;
+  if (r.ok) c.lyrics = lyricsState(data, 200);
+  else toast("Couldn't switch to that version.");
+  render();
+}
+
+let _lyricsOffsetTimer = null;
+function nudgeLyrics(delta) {
+  const ly = state.current?.lyrics;
+  if (!ly?.entry) return;
+  ly.offset = delta === 0 ? 0 : clampOffset(ly.offset + delta);
+  const off = app.querySelector(".ly-offset-val");
+  if (off) off.textContent = fmtOffset(ly.offset);
+  _lastLyricLine = -2;
+  paintLyrics(engine?.getCurrentTime?.() ?? 0);
+  clearTimeout(_lyricsOffsetTimer);
+  const id = state.current.id;
+  const value = ly.offset;
+  _lyricsOffsetTimer = setTimeout(() => {
+    fetch(`/api/jobs/${id}/lyrics/offset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ offset_sec: value }) })
+      .catch(() => toast("Couldn't save the timing."));
+  }, 400);
+}
+
+const fmtOffset = (o) => `${o > 0 ? "+" : o < 0 ? "−" : ""}${Math.abs(o).toFixed(1)} s`;
+
+function shiftedLyricLines() {
+  const ly = state.current?.lyrics;
+  return ly?.lines?.length ? shiftLines(ly.lines, ly.offset || 0) : [];
+}
+
+let _lastLyricLine = -2;
+// Highlights the line being sung and wipes its words; scrolls it into view when it changes.
+function paintLyrics(t) {
+  if (state.mixerView !== "lyrics" || state.tab !== "mixer") return;
+  const lines = shiftedLyricLines();
+  if (!lines.length) return;
+  const i = currentLineIndex(lines, t);
+  const els = app.querySelectorAll(".ly-line");
+  if (i !== _lastLyricLine) {
+    els.forEach((el) => el.classList.toggle("cur", Number(el.dataset.ly) === i));
+    const el = i >= 0 ? app.querySelector(`.ly-line[data-ly="${i}"]`) : null;
+    if (el) el.scrollIntoView({ block: "center", behavior: _lastLyricLine === -2 ? "auto" : "smooth" });
+    _lastLyricLine = i;
+  }
+  if (i < 0) return;
+  const words = app.querySelectorAll(`.ly-line[data-ly="${i}"] .ly-w`);
+  if (!words.length) return;
+  const timing = wordTimings(lines[i], lines[i + 1]?.time ?? null);
+  words.forEach((w, k) => {
+    const wt = timing[k];
+    const p = !wt ? 1 : t <= wt.start ? 0 : t >= wt.end ? 1 : (t - wt.start) / (wt.end - wt.start);
+    w.style.setProperty("--p", (p * 100).toFixed(1) + "%");
+  });
+}
+
+function lyricLineHtml(line, i, next) {
+  const words = wordTimings(line, next?.time ?? null);
+  const inner = words.length ? words.map((w) => `<span class="ly-w">${esc(w.text)}</span>`).join("") : "&nbsp;";
+  return `<p class="ly-line" data-ly="${i}" data-action="ly-seek" data-time="${line.time}">${inner}</p>`;
+}
+
+function lyricsBody() {
+  const ly = state.current?.lyrics;
+  const notes = state.current?.detail?.notes || {};
+  const credit = `<div class="ly-credit">Lyrics from LRCLIB (lrclib.net), a free community database.</div>`;
+  if (!state.current) return "";
+  if (!ly || ly.loading) return `<div class="pad"><div class="lib-note">Looking for the lyrics…</div></div>`;
+  const e = ly.entry;
+  const othersHtml = ly.others?.length
+    ? `<div class="eyebrow">OTHER VERSIONS</div>${ly.others.map((o) =>
+      `<button class="ly-other" data-action="ly-choose" data-id="${esc(String(o.lrclib_id))}"><span>${esc(o.artist || "?")} – ${esc(o.track || "?")}</span><span class="ly-other-meta">${fmt(o.duration || 0)} · ${o.synced ? "synced" : o.instrumental ? "instrumental" : "text"}</span></button>`).join("")}`
+    : "";
+  if (e && ly.lines.length) {
+    const lines = shiftLines(ly.lines, 0);
+    const warn = e.timing === "unverified"
+      ? `<div class="ly-warn">This version is ${fmt(e.duration)} long, the song ${fmt(curDuration())}: the timing may be off. Use the offset to line it up.</div>` : "";
+    return `<div class="pad ly-pad">
+      ${warn}
+      <div class="ly-offset-label">Lyrics timing</div>
+      <div class="ly-offset"><button class="ly-btn" data-action="ly-nudge" data-d="-0.5">−0.5</button>
+        <button class="ly-btn" data-action="ly-nudge" data-d="-0.1">−0.1</button>
+        <span class="ly-offset-val">${fmtOffset(ly.offset || 0)}</span>
+        <button class="ly-btn" data-action="ly-nudge" data-d="0.1">+0.1</button>
+        <button class="ly-btn" data-action="ly-nudge" data-d="0.5">+0.5</button>
+        <button class="ly-btn" data-action="ly-nudge" data-d="0" aria-label="Reset the timing">↺</button></div>
+      <div class="ly-lines">${lines.map((l, i) => lyricLineHtml(l, i, lines[i + 1])).join("")}</div>
+      ${othersHtml}${credit}</div>`;
+  }
+  if (e && e.instrumental && !e.plain) return `<div class="pad ly-pad"><div class="lib-note">LRCLIB lists this song as instrumental.</div>${othersHtml}${credit}</div>`;
+  if (e && e.plain) {
+    return `<div class="pad ly-pad"><div class="ly-warn">These lyrics have no timing, so they don't follow the music.</div>
+      <pre class="ly-plain">${esc(e.plain)}</pre>${othersHtml}${credit}</div>`;
+  }
+  const q = lyricsQueryFields();
+  const off = ly.disabled || !state.lyricsLookup;
+  const why = ly.error || (off ? "" : notes.lyrics || "No lyrics yet for this song.");
+  return `<div class="pad ly-pad">
+    ${why ? `<div class="lib-note" style="margin-top:4px">${esc(why)}</div>` : ""}
+    ${off ? `<div class="ly-warn">Lyrics lookup is off. When on, it sends only the artist, title, album and length to lrclib.net.
+      <button class="cta sm ghost" data-action="tab" data-tab="settings" style="margin-top:10px">Open Settings</button></div>` : ""}
+    <div class="eyebrow">SEARCH</div>
+    <label class="ly-field"><span>Artist</span><input data-ly-artist type="text" autocomplete="off" value="${esc(q.artist)}"></label>
+    <label class="ly-field"><span>Title</span><input data-ly-title type="text" autocomplete="off" value="${esc(q.title)}"></label>
+    <button class="cta sm" data-action="ly-lookup" ${off ? "disabled style=opacity:.45" : ""}>Look up the lyrics</button>
+    ${othersHtml}${credit}</div>`;
+}
+
+// ── Android: Settings ──
+function settingsScreen() {
+  const row = (action, on, title, text) => `<button class="set-row" data-action="${action}" aria-pressed="${on}">
+      <span class="set-text"><span class="set-title">${title}</span><span class="set-sub">${text}</span></span>
+      <span class="set-switch${on ? " on" : ""}"><i></i></span></button>`;
+  return `<div class="screen scrl">
+    <div class="pad">
+      <div class="lib-head">
+        <span class="h1">Settings</span>
+        <button class="icon-btn" data-action="tab" data-tab="library" aria-label="Back to the Library">${ICON.chevron}</button>
+      </div>
+      <div class="eyebrow">NETWORK</div>
+      <div class="set-note">StemDeck separates and analyses on this phone. It downloads each model once, the first time a feature needs it, and nothing else goes online unless you turn it on here.</div>
+      ${row("set-lyrics", state.lyricsLookup, "Look up lyrics",
+        "For each new song, and when you search in the Lyrics tab, asks LRCLIB (lrclib.net). Only the artist, title, album and length are sent.")}
+    </div>
+  </div>`;
+}
+
+function saveSetting(body, apply) {
+  return fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then(apply)
+    .catch(() => toast("Couldn't save that."))
+    .finally(() => render());
+}
+
 // Beats and bar starts as a strip under the waveform (detected grid).
 function beatStrip() {
   const g = currentGrid();
@@ -475,6 +687,7 @@ function onEngineTime(t) {
   if (head) head.style.left = state.progress * 100 + "%";
   if (cur) cur.textContent = fmt(t);
   paintWaveProgress();
+  paintLyrics(t); // Android
 }
 
 // Load a track: fetch detail, build lanes, spin up the Web Audio engine.
@@ -494,6 +707,7 @@ async function openTrack(card, { autoplay = false } = {}) {
   pendingPlay = autoplay;
   state.click.mult = 1; // Android: half/double time is per song, as on desktop
   state.loopSection = null; // Android: a new song starts without a loop
+  loadLyrics(card.id, token); // Android
 
   // Android: the click track's beat grid, alongside the detail (404 when the
   // song has none, e.g. separated before 1.1).
@@ -548,6 +762,8 @@ async function openTrack(card, { autoplay = false } = {}) {
     analysis: extractAnalysis(detail, laneList),
     notes: detail.analysis_notes || {}, // Android: why the beat grid or key is missing
     sections: Array.isArray(detail.sections) ? detail.sections : null, // Android: automatic sections
+    audioTags: detail.audio_tags || {}, // Android: for the lyrics search
+    lyricsQuery: detail.lyrics_query || null,
   };
   state.current.loading = false;
   state.current.stemCount = laneList.length;
@@ -809,7 +1025,7 @@ function mixerScreen() {
   const sourceTag = c.sub || "—";
   const stemTag = c.stemCount ? `${c.stemCount} stems` : "";
   const dur = curDuration();
-  const body = state.mixerView === "stems" ? stemsBody() : analysisBody();
+  const body = state.mixerView === "stems" ? stemsBody() : state.mixerView === "lyrics" ? lyricsBody() : analysisBody();
   const ready = engineReady && engineTrackId === state.current?.id;
   const preparing = !!state.current && !state.current.loading && !state.current.error && !ready;
   const canPlay = ready;
@@ -852,6 +1068,7 @@ function mixerScreen() {
       <div class="segmented">
         <button class="${state.mixerView === "stems" ? "on" : ""}" data-action="mixview" data-view="stems">Stems</button>
         <button class="${state.mixerView === "analysis" ? "on" : ""}" data-action="mixview" data-view="analysis">Analysis</button>
+        <button class="${state.mixerView === "lyrics" ? "on" : ""}" data-action="mixview" data-view="lyrics">Lyrics</button>
       </div>
     </div>
     ${body}
@@ -902,7 +1119,7 @@ function libraryScreen() {
     <div class="pad">
       <div class="lib-head">
         <span class="h1">Library</span>
-        <div class="avatar">JS</div>
+        <button class="icon-btn" data-action="tab" data-tab="settings" aria-label="Settings">${ICON.gear}</button>
       </div>
       <div class="search">${ICON.search}<span>Search your library</span></div>
       <div class="filters scrl">${FILTERS.map((f) => `<span class="filter ${f === state.filter ? "on" : ""}" data-action="filter" data-filter="${f}">${f}</span>`).join("")}</div>
@@ -1141,6 +1358,7 @@ function render() {
   let screen = mixerScreen();
   if (state.tab === "library") screen = libraryScreen();
   else if (state.tab === "extract") screen = extractScreen();
+  else if (state.tab === "settings") screen = settingsScreen(); // Android
   const mini = miniPlayer();
   // Android: the screens leave room for the mini player too while it shows,
   // so it does not cover the last item (e.g. the Extract stems button).
@@ -1149,6 +1367,10 @@ function render() {
   _lastPlayedBar = -1; // bars were just rebuilt; force a repaint on next tick
   wireFaders();
   wireSwipe();
+  if (state.tab === "mixer" && state.mixerView === "lyrics") { // Android
+    _lastLyricLine = -2;
+    paintLyrics(engine?.getCurrentTime?.() ?? 0);
+  }
 }
 
 // Suppresses the synthetic click that follows a swipe gesture, so swiping a
@@ -1422,6 +1644,7 @@ app.addEventListener("click", (e) => {
       break;
     case "mixview":
       state.mixerView = t.dataset.view;
+      _lastLyricLine = -2; // Android: scroll to the current line when the Lyrics view opens
       break;
     case "prev":
       prevTrack();
@@ -1442,6 +1665,23 @@ app.addEventListener("click", (e) => {
       state.solo[t.dataset.id] = !state.solo[t.dataset.id];
       applyMix();
       break;
+    case "set-lyrics": // Android
+      saveSetting({ lyrics_lookup: !state.lyricsLookup }, (d) => { state.lyricsLookup = !!d.lyrics_lookup; });
+      return;
+    case "ly-lookup": // Android
+      lookUpLyrics(true);
+      return;
+    case "ly-choose": // Android
+      chooseLyrics(t.dataset.id);
+      return;
+    case "ly-nudge": // Android
+      nudgeLyrics(Number(t.dataset.d));
+      return;
+    case "ly-seek": { // Android: a tap on a line plays from it
+      const time = Number(t.dataset.time) + (state.current?.lyrics?.offset || 0);
+      if (engine && Number.isFinite(time)) { engine.seek(Math.max(0, time)); onEngineTime(Math.max(0, time)); }
+      return;
+    }
     case "auto-sections": // Android
       saveAutoSections(!state.autoSections);
       break;

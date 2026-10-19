@@ -77,7 +77,14 @@ def job(jid: str, title: str, with_grid: bool) -> dict:
     }
 
 
+LRC = "\n".join(f"[00:{t:02d}.00]Line {i} of the song" for i, t in enumerate(range(1, 24, 2)))
+LYRICS = {"v": 1, "source": "lrclib", "track": "Grid Song", "artist": "Test", "album": "", "duration": 24.0,
+          "synced": LRC, "plain": "", "instrumental": False, "lrclib_id": 7, "timing": "exact",
+          "others": [{"v": 1, "source": "lrclib", "track": "Grid Song", "artist": "Test", "album": "Live", "duration": 31.0,
+                      "synced": "", "plain": "Other words", "instrumental": False, "lrclib_id": 8}]}
 JOBS = [job("a1b2c3d4e5f6", "Grid Song", True), job("b1b2c3d4e5f6", "Old Song", False)]
+JOBS[1]["analysis_notes"]["lyrics"] = "No lyrics: LRCLIB has none."
+JOBS[1]["audio_tags"] = {"title": "Old Song", "artist": "Old Band"}
 # A song after the lead/backing split: those two lanes replace Vocals.
 _split = job("c1b2c3d4e5f6", "Split Song", False)
 _split["stems"] += [{"name": n, "url": f"/api/jobs/c1b2c3d4e5f6/stems/vocals.wav"} for n in ("lead_vocals", "backing_vocals")]
@@ -88,7 +95,9 @@ JOBS.append(_split)
 
 class Api(BaseHTTPRequestHandler):
     # auto_sections left on by an "earlier session": the page must switch it off.
-    settings = {"stem_format": "mp3", "gpu": True, "click": {}, "auto_sections": True}
+    settings = {"stem_format": "mp3", "gpu": True, "click": {}, "auto_sections": True, "lyrics_lookup": False}
+    lookups: list = []
+    offsets: list = []
     puts: list = []
     downloads: list = []
 
@@ -107,6 +116,15 @@ class Api(BaseHTTPRequestHandler):
     def do_PUT(self):
         n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n) or b"{}")
+        m = re.match(r"^/api/jobs/([0-9a-f]{12})/lyrics/(lookup|offset)$", self.path)
+        if m and m.group(2) == "lookup":
+            Api.lookups.append(body)
+            if not Api.settings.get("lyrics_lookup"):
+                return self.send(403, b'{"detail":"off","disabled":true}', "application/json")
+            return self.send(200, json.dumps(LYRICS).encode(), "application/json")
+        if m and m.group(2) == "offset":
+            Api.offsets.append(body.get("offset_sec"))
+            return self.send(200, json.dumps({"offset_sec": body.get("offset_sec")}).encode(), "application/json")
         if self.path == "/api/settings":
             Api.puts.append(body)
             Api.settings.update({k: v for k, v in body.items() if k != "click"})
@@ -135,6 +153,10 @@ class Api(BaseHTTPRequestHandler):
                 return self.send(404, b'{"detail":"job not found"}', "application/json")
             if rest == "":
                 return self.send(200, json.dumps(j).encode(), "application/json")
+            if rest == "/lyrics":
+                if j["job_id"] == "a1b2c3d4e5f6":
+                    return self.send(200, json.dumps(LYRICS).encode(), "application/json")
+                return self.send(404, b'{"detail":"no lyrics","others":[]}', "application/json")
             if rest == "/stems/beats.json":
                 if j["bpm"] is None:
                     return self.send(404, b'{"detail":"beat grid not found"}', "application/json")
@@ -199,6 +221,7 @@ def main() -> int:
               const orig = AudioContext.prototype.createOscillator;
               AudioContext.prototype.createOscillator = function () { window.__osc++; return orig.call(this); };
             """)
+            Api.settings["lyrics_lookup"] = False  # each size starts with the lookup off
             page.goto(base + "/mobile/#library")
             page.wait_for_selector(".track[data-id='a1b2c3d4e5f6']")
             page.click(".track-load[data-id='a1b2c3d4e5f6']")
@@ -265,6 +288,29 @@ def main() -> int:
             check(any("click=1" in u and "click_accent=3" in u and "click_mult=2" in u for u in Api.downloads), f"{h}: mix export carries the click options")
             if shots:
                 page.screenshot(path=str(shots / f"analysis-{h}.png"), full_page=True)
+            # Lyrics: lines from the LRC, the current one follows the playhead, a tap seeks.
+            page.click("[data-action='mixview'][data-view='lyrics']")
+            page.wait_for_selector(".ly-line")
+            check(page.locator(".ly-line").count() == LRC.count("\n") + 1, f"{h}: one row per LRC line")
+            page.click(".ly-line[data-ly='2']")
+            page.wait_for_timeout(300)
+            check(page.get_attribute(".ly-line.cur", "data-ly") == "2", f"{h}: tapping a line highlights it")
+            check(page.inner_text(".wave-times .cur").strip() == "0:05", f"{h}: tapping a line seeks to it ({page.inner_text('.wave-times .cur')})")
+            page.click(".t-play")
+            page.wait_for_timeout(3000)
+            cur = page.get_attribute(".ly-line.cur", "data-ly")
+            shown = page.inner_text(".wave-times .cur").strip()
+            check(cur == "3", f"{h}: the highlight follows the playhead (line {cur} at {shown})")
+            wiped = page.evaluate("getComputedStyle(document.querySelector('.ly-line.cur .ly-w')).getPropertyValue('--p')")
+            check(bool(wiped.strip()), f"{h}: the current line's words are wiped ({wiped!r})")
+            page.click(".t-play")
+            page.click("[data-action='ly-nudge'][data-d='0.5']")
+            page.wait_for_timeout(700)
+            check(0.5 in Api.offsets, f"{h}: the timing offset is saved ({Api.offsets})")
+            check("Live" in page.inner_text(".ly-pad") or page.locator(".ly-other").count() == 1, f"{h}: other versions offered")
+            if shots:
+                page.screenshot(path=str(shots / f"lyrics-{h}.png"), full_page=False)
+            page.click("[data-action='mixview'][data-view='analysis']")
             # A song with no grid: no click controls, and the reason shown.
             page.click("[data-action='mixview'][data-view='stems']")
             page.click("[data-action='tab'][data-tab='library']")
@@ -272,6 +318,24 @@ def main() -> int:
             page.wait_for_selector(".t-play:not([disabled])", timeout=15000)
             check(page.locator(".click-row").count() == 0, f"{h}: no click controls without a grid")
             check("only 3 beats" in page.inner_text(".click-note"), f"{h}: says why there is no grid")
+            # No lyrics, lookup off: the search form, and Settings to turn it on.
+            page.click("[data-action='mixview'][data-view='lyrics']")
+            page.wait_for_selector("[data-ly-title]")
+            check(page.input_value("[data-ly-title]") == "Old Song" and page.input_value("[data-ly-artist]") == "Old Band", f"{h}: search prefilled from the tags")
+            check("lookup is off" in page.inner_text(".ly-pad"), f"{h}: says the lookup is off")
+            page.click(".ly-pad [data-action='tab'][data-tab='settings']")
+            page.wait_for_selector(".set-row")
+            check(page.get_attribute("[data-action='set-lyrics']", "aria-pressed") == "false", f"{h}: lyrics lookup off by default")
+            page.click("[data-action='set-lyrics']")
+            page.wait_for_timeout(300)
+            check(Api.settings.get("lyrics_lookup") is True, f"{h}: lyrics lookup turned on in Settings")
+            page.click("[data-action='tab'][data-tab='mixer']")
+            page.fill("[data-ly-title]", "Old Song (Remix)")
+            page.click("[data-action='ly-lookup']")
+            page.wait_for_selector(".ly-line")
+            check(Api.lookups and Api.lookups[-1].get("title") == "Old Song (Remix)" and Api.lookups[-1].get("artist") == "Old Band",
+                  f"{h}: the lookup sends the edited artist and title ({Api.lookups[-1:]})")
+            page.click("[data-action='mixview'][data-view='stems']")
             # The split song: Lead and Backing lanes instead of Vocals.
             page.click("[data-action='tab'][data-tab='library']")
             page.click(".track-load[data-id='c1b2c3d4e5f6']")

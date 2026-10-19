@@ -155,6 +155,11 @@ class LocalServer(
             // request answers when it is done, as desktop's does.
             parts.size == 3 && parts[2] == "vocal-split" && method == Method.POST -> vocalSplit(job)
             parts.size == 3 && parts[2] == "mixdown.wav" -> mixdown(s, job)
+            // Android 1.3: lyrics (desktop's GET .../lyrics, POST .../lyrics/lookup and .../lyrics/offset).
+            parts.size == 3 && parts[2] == "lyrics" && method == Method.GET -> lyrics(job)
+            parts.size == 4 && parts[2] == "lyrics" && parts[3] == "lookup" && method == Method.POST -> lyricsLookup(s, job)
+            parts.size == 4 && parts[2] == "lyrics" && parts[3] == "offset" && method == Method.POST -> lyricsOffset(s, job)
+            parts.size == 4 && parts[2] == "lyrics" && parts[3] == "choose" && method == Method.POST -> lyricsChoose(s, job)
             // Android 1.1: the click track's beat grid, and every stem in one ZIP.
             parts.size == 4 && parts[2] == "stems" && parts[3] == "beats.json" -> beatGrid(job)
             parts.size == 4 && parts[2] == "stems" && parts[3] == "all.zip" -> stemsZip(s, job)
@@ -187,12 +192,90 @@ class LocalServer(
         val staged = File(context.cacheDir, "upload-${System.nanoTime()}.${fileName.substringAfterLast('.', "bin").take(8)}")
         File(upload).copyTo(staged, overwrite = true)
         val format = s.parameters["format"]?.firstOrNull()?.takeIf { it in Settings.FORMATS } ?: settings.stemFormat
+        val tags = readTags(staged)
         // Captured now, like desktop: the sections choice belongs to this import.
         val job = store.create(
             titleFrom(fileName), "local:${fileName.substringBeforeLast('.')}", selected, staged, format, settings.autoSections,
         )
+        if (tags.isNotEmpty()) store.update(job.id) { it.audioTags = tags }
         onJobQueued()
         return json(200, JSONObject().put("job_id", job.id).put("status", job.status))
+    }
+
+    private val lyricsStore get() = org.stemdeckport.android.App.instance.lyrics
+    private val lookups = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /** lyrics.json, or 404 carrying the versions LRCLIB offered ({"others": [...]}). */
+    private fun lyrics(job: Job): Response {
+        val entry = lyricsStore.read(job.id)
+        if (entry != null) {
+            if ((entry.optJSONArray("others")?.length() ?: 0) == 0) entry.put("others", lyricsStore.candidates(job.id))
+            return json(200, entry)
+        }
+        val others = lyricsStore.candidates(job.id)
+        return json(404, detail("no lyrics").put("others", others))
+    }
+
+    /**
+     * Looks the lyrics up now (the Lyrics tab's "Look up"). An optional
+     * {"artist", "title", "album"} is the user's own entry, kept on the song
+     * and used instead of its tags; with it a song that has lyrics is looked
+     * up again. 403 while the lookup is off in Settings, 502 when LRCLIB
+     * cannot be reached.
+     */
+    private fun lyricsLookup(s: IHTTPSession, job: Job): Response {
+        if (!settings.lyricsLookup) {
+            return json(403, detail("Lyrics lookup is off. Turn it on in Settings, under Network.").put("disabled", true))
+        }
+        val body = try { JSONObject(readBody(s).ifBlank { "{}" }) } catch (e: Exception) { JSONObject() }
+        val edited = body.has("artist") || body.has("title")
+        if (edited) {
+            val q = JSONObject()
+                .put("artist", body.optString("artist").trim().take(256))
+                .put("title", body.optString("title").trim().take(256))
+                .put("album", body.optString("album").trim().take(256))
+            store.update(job.id) { it.lyricsQuery = q }
+        } else if (lyricsStore.read(job.id) != null) {
+            return lyrics(job)
+        }
+        val fresh = store.get(job.id) ?: return json(404, detail("job not found"))
+        val query = lyricsStore.query(fresh)
+            ?: return json(404, detail("nothing to look up").put("others", JSONArray()).put("nothing_known", true))
+        if (!lookups.add(job.id)) return json(409, detail("already looking"))
+        try {
+            val answer = org.stemdeckport.android.data.LrcLib.lookup(
+                query, org.stemdeckport.android.data.LrcLib.http(org.stemdeckport.android.App.instance.userAgent),
+            )
+            if (answer != null) {
+                if (answer.entry != null && edited) lyricsStore.lyricsFile(job.id).delete()
+                lyricsStore.keep(job.id, answer)
+            }
+        } catch (e: Exception) {
+            Log.i(TAG, "lyrics lookup failed", e)
+            return json(502, detail("lyrics service unreachable"))
+        } finally {
+            lookups.remove(job.id)
+        }
+        return lyrics(job)
+    }
+
+    private fun lyricsOffset(s: IHTTPSession, job: Job): Response {
+        val v = try { JSONObject(readBody(s)).getDouble("offset_sec") } catch (e: Exception) {
+            return json(422, detail("invalid lyrics edit"))
+        }
+        val entry = lyricsStore.read(job.id) ?: return json(404, detail("no lyrics"))
+        if (entry.optString("synced").isEmpty()) return json(409, detail("lyrics are not synced"))
+        val kept = lyricsStore.setOffset(job.id, v) ?: return json(422, detail("invalid lyrics edit"))
+        return json(200, JSONObject().put("offset_sec", kept))
+    }
+
+    /** Android: keep another of the offered versions instead. */
+    private fun lyricsChoose(s: IHTTPSession, job: Job): Response {
+        val id = try { JSONObject(readBody(s)).getLong("lrclib_id") } catch (e: Exception) {
+            return json(422, detail("invalid lyrics edit"))
+        }
+        lyricsStore.choose(job.id, id) ?: return json(404, detail("no such version"))
+        return lyrics(job)
     }
 
     private fun vocalSplit(job: Job): Response {
@@ -207,6 +290,23 @@ class LocalServer(
             "done" -> json(200, after.toState())
             "none" -> json(409, detail("vocal split cancelled"))
             else -> json(500, detail("vocal split failed"))
+        }
+    }
+
+    /** The file's title, artist and album tags (desktop's audio_tags), for the lyrics lookup. */
+    private fun readTags(f: File): Map<String, String> {
+        val r = android.media.MediaMetadataRetriever()
+        return try {
+            r.setDataSource(f.path)
+            mapOf(
+                "title" to android.media.MediaMetadataRetriever.METADATA_KEY_TITLE,
+                "artist" to android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST,
+                "album" to android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM,
+            ).mapNotNull { (k, key) -> r.extractMetadata(key)?.trim()?.takeIf { it.isNotEmpty() }?.let { k to it.take(256) } }.toMap()
+        } catch (e: Exception) {
+            emptyMap()
+        } finally {
+            try { r.release() } catch (_: Exception) {}
         }
     }
 
@@ -357,8 +457,9 @@ class LocalServer(
         }
 
         private fun reason(code: Int) = when (code) {
-            200 -> "OK"; 400 -> "Bad Request"; 403 -> "Forbidden"; 404 -> "Not Found"
-            405 -> "Method Not Allowed"; 422 -> "Unprocessable Entity"; 500 -> "Internal Server Error"; 501 -> "Not Implemented"
+            200 -> "OK"; 202 -> "Accepted"; 400 -> "Bad Request"; 403 -> "Forbidden"; 404 -> "Not Found"
+            405 -> "Method Not Allowed"; 409 -> "Conflict"; 422 -> "Unprocessable Entity"; 500 -> "Internal Server Error"
+            501 -> "Not Implemented"; 502 -> "Bad Gateway"
             else -> "Status"
         }
 
