@@ -7,7 +7,7 @@ name: Models
 on:
   push:
     branches: [main, 'phase*']
-    paths: ['models/**', 'scripts/export_models.py', '.github/workflows/models.yml']
+    paths: ['models/**', 'scripts/export_models.py', 'scripts/parity-requirements.txt', '.github/workflows/models.yml']
   workflow_dispatch:
 
 permissions:
@@ -21,18 +21,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Pinned toolchain (the export is reproducible byte for byte with these)
-        run: |
-          pip install --quiet torch==2.6.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu
-          pip install --quiet beat-this==1.1.0 einops==0.8.2 rotary-embedding-torch==0.6.5 soxr==1.0.0 \
-            numpy==2.4.4 onnx==1.23.2 protobuf==7.36.0 ml_dtypes==0.6.0 onnxruntime==1.29.0
+          cache: pip
+          cache-dependency-path: scripts/parity-requirements.txt
+      - name: Pinned toolchain (the export is reproducible byte for byte with these; same set as the parity job)
+        run: pip install --quiet --extra-index-url https://download.pytorch.org/whl/cpu -r scripts/parity-requirements.txt
       - name: Checkpoints
         run: |
           mkdir -p ckpt
           curl -fsSL --retry 3 -o ckpt/final0.ckpt https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/final0.ckpt
           echo "8c328b45f59d8dd3dff219253ff6a8d6482be57d0133a29140e2febbf8eb8331  ckpt/final0.ckpt" | sha256sum -c
       - name: Export and check
-        run: python3 scripts/export_models.py --out out --beat-this-ckpt ckpt/final0.ckpt --check-manifest
+        run: |
+          set -o pipefail
+          python3 scripts/export_models.py --out out --beat-this-ckpt ckpt/final0.ckpt --check-manifest 2>&1 | grep -v -i -E "warning|autocast" | tee export.log
       - name: Publish what is not published yet
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,3 +56,8 @@ jobs:
               gh release upload "$rel" "out/$name" --repo "${{ github.repository }}"
             fi
           done < publish.txt
+      - name: Publish logs to a ci-logs branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci_logs.sh models ${{ github.run_id }} ${{ github.sha }} ${{ job.status == 'failure' }}

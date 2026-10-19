@@ -152,14 +152,9 @@ jobs:
           PY
       - name: Publish logs to a ci-logs branch
         if: always()
-        run: |
-          mkdir -p /tmp/ci-logs
-          cp -f *.log /tmp/ci-logs/ 2>/dev/null || true
-          cd /tmp/ci-logs
-          echo "run ${{ github.run_id }} job ${{ github.job }} sha ${{ github.sha }}" > INFO.txt
-          git init -q -b logs && git add -A
-          git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs ${{ github.run_id }} ${{ github.job }}"
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" logs:refs/heads/ci-logs/${{ github.job }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci_logs.sh ${{ github.job }} ${{ github.run_id }} ${{ github.sha }} ${{ job.status == 'failure' }}
 
   analysis:
     name: Analysis stages against desktop StemDeck
@@ -228,15 +223,9 @@ jobs:
           python3 scripts/ui_test.py --shots ui-shots 2>&1 | tee ui-test.log
       - name: Publish logs to a ci-logs branch
         if: always()
-        run: |
-          mkdir -p /tmp/ci-logs
-          cp -f *.log /tmp/ci-logs/ 2>/dev/null || true
-          cp -rf ui-shots /tmp/ci-logs/ 2>/dev/null || true
-          cd /tmp/ci-logs
-          echo "run ${{ github.run_id }} job ${{ github.job }} sha ${{ github.sha }}" > INFO.txt
-          git init -q -b logs && git add -A
-          git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs ${{ github.run_id }} ${{ github.job }}"
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" logs:refs/heads/ci-logs/${{ github.job }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci_logs.sh ${{ github.job }} ${{ github.run_id }} ${{ github.sha }} ${{ job.status == 'failure' }} ui-shots
 
   apk:
     name: APK
@@ -289,14 +278,9 @@ jobs:
           python3 scripts/check_apk.py app/build/outputs/apk/release/app-release.apk | tee apk-check.log
       - name: Publish logs to a ci-logs branch
         if: always()
-        run: |
-          mkdir -p /tmp/ci-logs
-          cp -f *.log /tmp/ci-logs/ 2>/dev/null || true
-          cd /tmp/ci-logs
-          echo "run ${{ github.run_id }} job ${{ github.job }} sha ${{ github.sha }}" > INFO.txt
-          git init -q -b logs && git add -A
-          git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs ${{ github.run_id }} ${{ github.job }}"
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" logs:refs/heads/ci-logs/${{ github.job }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci_logs.sh ${{ github.job }} ${{ github.run_id }} ${{ github.sha }} ${{ job.status == 'failure' }}
       - name: Rename
         run: |
           cp app/build/outputs/apk/release/app-release.apk StemDeck-Android.apk
