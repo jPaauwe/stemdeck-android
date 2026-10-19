@@ -23,20 +23,25 @@ apps.
 
 ## What it measures
 
-The app contains two engines: the **optimized** engine from this build, and
-a **baseline**, a frozen copy of the engine as it was before optimizing
-started (commit `b76c67a`, in `src/main/cpp/baseline`).
+The app contains three engines (see [`engines/`](../engines/README.md)):
 
-1. **One 7.8-second segment on one thread**, the unit Demucs works in. Both
-   engines run it twice and the best time is kept. Then:
-   - how close the optimized output is to the baseline, per stem (SNR in dB;
-     above 60 is identical to the ear),
-   - where the time goes in the optimized engine, per stage (STFT, encoder,
+- **original demucs.cpp**: upstream, unmodified (`engines/original`),
+- **builds 4–10**: the first released StemDeck engine (`engines/b4`),
+- **app engine (build 13)**: the engine the app uses now (`/engine`).
+
+1. **One 7.8-second segment on one thread**, the unit Demucs works in. Each
+   engine runs it twice and the best time is kept. Then:
+   - each engine's speed relative to the original,
+   - how close each engine's output is to the original's, per stem (SNR in
+     dB; above 60 is identical to the ear),
+   - where the time goes in the app's engine, per stage (STFT, encoder,
      transformer, decoder…) and per operation (convolutions, attention,
      normalization…).
-2. **A full synthetic test song** separated as the app does, at each thread
-   count you picked: time, speed relative to the song's length, peak memory
-   and the phone's thermal state. Optionally the baseline too.
+2. **A full synthetic test song** through each engine's real separation
+   path. The app's engine runs at each thread count you picked; optionally
+   the original (1 thread, the whole song at once) and builds 4–10 (2
+   threads) run too. You get the time, speed relative to the song's length,
+   peak memory and the phone's thermal state.
 
 The report starts with the phone model, chip, Android version, core count and
 RAM, so results from different phones can be told apart.
@@ -46,7 +51,7 @@ RAM, so results from different phones can be told apart.
 - `src/main/java/org/stemdeckport/bench/`: the UI (`BenchActivity.kt`), the
   model download (`ModelManager.kt`) and the JNI bindings (`Natives.kt`).
 - `src/main/cpp/`: `bench_jni.cpp` binds the shared benchmark code in
-  `engine/bench/bench_core.cpp` twice, once to each engine. The optimized
+  `engine/bench/bench_core.cpp` once to each engine. The optimized
   engine is built with `SD_PROFILE`, which turns on the per-stage and
   per-operation timers (`engine/demucs/sdprof.hpp`). Both engines are built
   with hidden symbols, so they can't clash in one process.

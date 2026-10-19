@@ -58,23 +58,29 @@ phone's memory), so memory stays flat however long the song is.
 
 ## Speed
 
-Separation is the slow part, and the main thing being worked on. Since build 12 the engine has been rewritten for speed (attention,
-convolutions, normalization, GELU and the layout transposes), about 1.4x
-faster per segment on CI's x86 runners so far, with the same output to within
-float rounding. Every push checks this in CI (`scripts/engine_test.py` and
-the host benchmark in `engine/test/bench_cli.cpp`): separation with the real
-model, and the optimized engine against a frozen copy of the original.
+Separation is the slow part. The app uses the **build 13** engine: Demucs'
+own segments over the whole song, with faster attention, convolutions and
+normalization. On a 2-core test computer it separated a song about 4x faster
+than the original demucs.cpp (on 2 threads; the original uses 1), with the
+same output when given the same time shift.
+Every earlier engine is kept in [`engines/`](engines/README.md), with the
+measurements. CI checks the engine on every push (`scripts/engine_test.py`
+and the host benchmark in `engine/test/bench_cli.cpp`): separation with the
+real model, and the app's engine against the first released one.
 
-Two separate apps measure it on the phone itself. Each release has both:
+Two separate apps measure the engines on the phone itself. Each release has
+both:
 
 - **[StemDeck Bench](bench/README.md)**
   ([download the latest](https://github.com/jPaauwe/stemdeck-android/releases/latest/download/StemDeck-Bench.apk)) profiles the
-  engine: where the time goes per stage and per operation, how speed and
-  memory scale with threads, and the current engine against the original.
+  engines: the original demucs.cpp, builds 4–10 and the app's engine, where
+  the time goes per stage and per operation, and how speed and memory scale
+  with threads.
 - **[StemDeck Compare](compare/README.md)**
   ([download the latest](https://github.com/jPaauwe/stemdeck-android/releases/latest/download/StemDeck-Compare.apk)) runs
-  your own song through any of the engine builds and compares their speed,
-  memory and stems.
+  your own song through the original demucs.cpp, builds 4–10 and build 13,
+  compares their speed, memory and stems, and lets you listen to them side
+  by side.
 
 ## Not yet on Android
 
@@ -90,7 +96,8 @@ git clone --recurse-submodules <this repo>
 ```
 
 This builds all three apps: `app/` (StemDeck), `bench/` and `compare/`. The
-separation engine they share is in `engine/`, and builds on a computer too:
+app's separation engine is in `engine/` (the benchmark apps also use the
+kept engines in `engines/`), and it builds on a computer too:
 
 ```sh
 cmake -S engine -B build/engine -DCMAKE_BUILD_TYPE=Release
@@ -98,9 +105,7 @@ cmake --build build/engine --target sdengine_cli sdbench_cli
 ```
 
 Needs the Android SDK with NDK 27.2.12479018 and CMake 3.22.1 (Android Studio
-installs them on first sync). StemDeck Compare also needs Python 3 and the
-repository's full git history with tags (`git fetch --tags --unshallow`), because it
-builds every engine version from the `build-*` tags.
+installs them on first sync). StemDeck Compare also needs Python 3.
 
 ## Credits and licences
 
@@ -110,10 +115,10 @@ builds every engine version from the `build-*` tags.
   `UPSTREAM_COMMIT` next to it.
 - demucs.cpp: MIT, © Sevag H (`engine/demucs/LICENSE`, upstream commit in
   `UPSTREAM_COMMIT`). Changed here for memory and speed: the convolutions
-  (`conv.hpp`), normalization, GLU, GELU, layer scale and attention
-  (`layers.cpp`), the layout transposes (`permute.hpp`) and
-  `demucs_inference_normalized` (`model_apply.cpp`). Results match the
-  original to float rounding. Each change is marked "StemDeck Android".
+  (`conv.hpp`), normalization, GLU, layer scale and attention
+  (`layers.cpp`) and `demucs_inference_normalized` (`model_apply.cpp`).
+  Results match the original to float rounding. Each change is marked
+  "StemDeck Android". The unmodified original is in `engines/original`.
 - Demucs and the `htdemucs_6s` weights: MIT, © Meta Platforms.
 - Eigen: MPL 2.0. NanoHTTPD: BSD 3-Clause.
 - [LAME](https://lame.sourceforge.io) 3.100, the MP3 encoder and decoder:

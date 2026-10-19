@@ -1,0 +1,2 @@
+From commit 8d24d93d2be9c9dfebf156839034ee0a42503117 (Engine: cut per-thread memory from ~1.7 GB to ~0.6 GB), release tags: build-4..build-10.
+Files as they were at that commit: engine.cpp, engine.hpp and demucs/ (and sdprof.cpp where it existed).

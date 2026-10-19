@@ -1,11 +1,15 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(stemdeck_bench CXX)
 
-# Defines sd_engine_library() and the engine being optimized.
+# Defines sd_engine_library() and the app's engine.
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../engine" engine EXCLUDE_FROM_ALL)
+set(ENGINES "${CMAKE_CURRENT_SOURCE_DIR}/../../../../engines")
 
+# The app's engine (with per-operation profiling), the first released
+# engine (builds 4-10) and the original, unmodified demucs.cpp.
 sd_engine_library(sdengine_opt_prof "${SD_ENGINE_DIR}" PROFILE)
-sd_engine_library(sdengine_base "${CMAKE_CURRENT_SOURCE_DIR}/baseline")
+sd_engine_library(sdengine_base "${ENGINES}/b4")
+sd_engine_library(sdengine_orig "${ENGINES}/original")
 
 find_library(log-lib log)
 
@@ -21,3 +25,4 @@ endfunction()
 
 sd_bench_lib(sdbench_opt sdengine_opt_prof "org/stemdeckport/bench/OptNative")
 sd_bench_lib(sdbench_base sdengine_base "org/stemdeckport/bench/BaseNative")
+sd_bench_lib(sdbench_orig sdengine_orig "org/stemdeckport/bench/OrigNative")

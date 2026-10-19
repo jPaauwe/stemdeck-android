@@ -95,7 +95,7 @@ class CompareActivity : Activity() {
             val cb = CheckBox(this).apply {
                 text = "${e.label}  —  ${e.description}"
                 setTextColor(fg); textSize = 12f
-                isChecked = i == 0 || i == engines.lastIndex
+                isChecked = true
             }
             engineBoxes += e to cb
             root.addView(cb)
@@ -310,7 +310,9 @@ class CompareActivity : Activity() {
         raw.delete(); input.delete()
         val songSeconds = prepared.length() / 8.0 / 44100.0
         out("Song: $songName, ${fmtTime(songSeconds)}, decoded from ${dec.sampleRate} Hz ${dec.channels} ch")
-        out("Threads: $threads   Reference: ${ref.label}\n")
+        out("Threads: $threads   Reference: ${ref.label}")
+        if (order.any { it.id == "original" }) out("(The original demucs.cpp always separates on 1 thread, the whole song at once.)")
+        out("")
 
         val results = mutableListOf<Result>()
         for ((i, e) in order.withIndex()) {
@@ -341,11 +343,11 @@ class CompareActivity : Activity() {
 
         // ─── speed ───
         out("\nSPEED (${fmtTime(songSeconds)} song, $threads thread${if (threads == 1) "" else "s"})")
-        out("  %-14s %9s %8s %9s %9s  %s".format("build", "time", "x song", "speed-up", "peak mem", "thermal"))
+        out("  %-20s %9s %8s %9s %9s  %s".format("build", "time", "x song", "speed-up", "peak mem", "thermal"))
         for (r in results) {
             val up = refRes?.let { it.seconds / r.seconds }
-            out("  %-14s %8.1fs %7.2fx %9s %7.2f GB  %s→%s".format(
-                r.engine.label.take(14), r.seconds, r.seconds / songSeconds,
+            out("  %-20s %8.1fs %7.2fx %9s %7.2f GB  %s→%s".format(
+                r.engine.label.take(20), r.seconds, r.seconds / songSeconds,
                 up?.let { "%.2fx".format(it) } ?: "-", r.peakGb, r.thermalStart, r.thermalEnd))
         }
 
@@ -355,7 +357,9 @@ class CompareActivity : Activity() {
         // ─── differences vs reference ───
         if (refRes != null && results.size > 1) {
             out("\nDIFFERENCE FROM ${ref.label.uppercase()} (SNR in dB; >60 identical, 40–60 inaudible, 20–40 small, <20 clearly different)")
-            out("  %-14s ".format("build") + STEMS.joinToString(" ") { "%7s".format(it) } + "     all")
+            out("  Note: Demucs shifts the song by a small random amount before separating. Two engines")
+            out("  with identical maths but a different shift differ by roughly 15–30 dB, more on quiet stems.")
+            out("  %-20s ".format("build") + STEMS.joinToString(" ") { "%7s".format(it) } + "     all")
             val worst = mutableListOf<String>()
             for (r in results) {
                 if (r === refRes) continue
@@ -363,7 +367,7 @@ class CompareActivity : Activity() {
                 diffs.put(r.engine.id, d)
                 val stems = d.getJSONArray("stems")
                 val cells = (0 until stems.length()).map { stems.getJSONObject(it) }
-                out("  %-14s ".format(r.engine.label.take(14)) +
+                out("  %-20s ".format(r.engine.label.take(20)) +
                     cells.joinToString(" ") { "%7.1f".format(it.getDouble("snr_db")) } +
                     "  %6.1f".format(d.getDouble("all_snr_db")))
                 cells.filter { it.getLong("worst_at") >= 0 }.minByOrNull { it.getDouble("worst_db") }?.let {
@@ -388,14 +392,14 @@ class CompareActivity : Activity() {
         out("\nSTEMS ADD BACK UP TO THE SONG (SNR dB, higher is better)")
         for (r in results) {
             val j = JSONObject(Host.nReconstruction(r.dir.path, prepared.path))
-            out("  %-14s %s".format(r.engine.label.take(14), if (j.has("snr_db")) "%.1f".format(j.getDouble("snr_db")) else j.optString("error")))
+            out("  %-20s %s".format(r.engine.label.take(20), if (j.has("snr_db")) "%.1f".format(j.getDouble("snr_db")) else j.optString("error")))
         }
         out("\nSTEM LEVELS (RMS dBFS)")
-        out("  %-14s ".format("build") + STEMS.joinToString(" ") { "%7s".format(it) })
+        out("  %-20s ".format("build") + STEMS.joinToString(" ") { "%7s".format(it) })
         for (r in results) {
             val d = JSONObject(Host.nDiff(r.dir.path, r.dir.path))
             val stems = d.getJSONArray("stems")
-            out("  %-14s ".format(r.engine.label.take(14)) +
+            out("  %-20s ".format(r.engine.label.take(20)) +
                 (0 until stems.length()).joinToString(" ") { "%7.1f".format(stems.getJSONObject(it).getDouble("rms_db")) })
         }
 

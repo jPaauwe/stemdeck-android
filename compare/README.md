@@ -14,10 +14,13 @@ library.
 
 1. Tap **Choose MP3**, or share a song to StemDeck Compare from another app.
    Any audio format Android can decode works.
-2. Tick the engine builds to compare. Builds that share an engine are one
-   entry, for example "builds 4–10".
-3. Pick the **reference** build that the others are compared with (it always
-   runs first) and the number of **threads**.
+2. Tick the engines to compare: the **original demucs.cpp** (upstream,
+   unmodified), **builds 4–10** (the first released StemDeck engine) and
+   **build 13** (the app's engine). See [`engines/`](../engines/README.md).
+3. Pick the **reference** that the others are compared with (it always runs
+   first; the original by default) and the number of **threads**. The
+   original always uses 1 thread and holds the whole song in memory, so it
+   is the slowest and needs the most memory.
 4. Tap **Run** and leave the phone alone. The screen stays on, and every build
    separates the whole song, so this takes a while. The first run also
    downloads the model (about 55 MB).
@@ -43,6 +46,10 @@ Options:
   60 dB is identical, 40–60 dB is inaudible, 20–40 dB is a small difference,
   below 20 dB is clearly different. For each build it names the stem and the
   second of the song where they differ most, so you know where to listen.
+  Demucs shifts the song by a small random amount before separating, and
+  each engine picks its own shift, so engines with identical maths still
+  differ by roughly 15–30 dB (more on near-silent stems). See
+  [`engines/README.md`](../engines/README.md#how-they-compare).
 - **Difference from the previous build:** the same, between consecutive
   builds.
 - **Stems add back up to the song:** how closely the six stems sum back to
@@ -75,11 +82,11 @@ kept, so you can come back to it later, until you start a new one.
 
 ## How it is built
 
-The engine builds come from git: at build time,
-`scripts/collect_engines.py` looks at every `build-*` tag, keeps one copy per
-distinct engine source, and adds the working tree's engine when it differs
-from the newest tag (listed as "this build"). New engine builds therefore
-show up in the next APK without any changes here.
+The engines come from the archive in [`engines/`](../engines/README.md): at
+build time, `scripts/engines_for_compare.py` takes the ones marked `yes` in
+`engines/engines.txt`. When the app's engine (`/engine`) is not one of them,
+it is added as "this build". To bring an archived engine back, mark it
+`yes`.
 
 Each engine version is compiled into its own library,
 `libsdengine_<id>.so` (`src/main/cpp/plugin.cpp` includes that version's
@@ -90,10 +97,9 @@ differences between the WAV files the versions write. The Listen screen
 (`ListenActivity.kt`) plays those WAV files through `StemPlayer.kt`, an
 AudioTrack player that can switch source mid-stream.
 
-Building it needs Python 3 and the full git history with tags:
+Building it needs Python 3:
 
 ```sh
-git fetch --tags --unshallow   # if your clone is shallow
 ./gradlew :compare:assembleRelease
 ```
 

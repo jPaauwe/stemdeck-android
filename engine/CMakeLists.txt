@@ -3,8 +3,8 @@
 #   sd_engine_library(<target> <source dir> [PROFILE])
 #
 # builds a static library from <source dir>/demucs/*.cpp and
-# <source dir>/engine.cpp. The bench app uses it twice: for this directory
-# (the engine being optimized) and for its frozen baseline copy.
+# <source dir>/engine.cpp. The bench app uses it for this directory (the
+# app's engine) and for kept engines in /engines.
 cmake_minimum_required(VERSION 3.22.1)
 project(stemdeck_engine CXX)
 
@@ -47,7 +47,8 @@ if(NOT ANDROID AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_include_directories(sdbench_cli PRIVATE bench)
   target_link_libraries(sdbench_cli sdengine_core_prof Threads::Threads)
 
-  set(SD_BASELINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../bench/src/main/cpp/baseline")
+  # The first released engine (builds 4-10), to check the app's engine against.
+  set(SD_BASELINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../engines/b4")
   if(EXISTS "${SD_BASELINE_DIR}/engine.cpp")
     sd_engine_library(sdengine_baseline "${SD_BASELINE_DIR}")
     add_executable(sdbench_cli_baseline test/bench_cli.cpp bench/bench_core.cpp)

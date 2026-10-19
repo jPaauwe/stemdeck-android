@@ -1,0 +1,10 @@
+demucs/ is sevagh/demucs.cpp at commit f1206e9adeea103aef4a636b9e62297cf1f8e34e
+(https://github.com/sevagh/demucs.cpp), the src/ folder unmodified, with its
+LICENSE (MIT).
+
+engine.cpp and engine.hpp are the StemDeck Android wrapper from builds 4–10
+(decoding, resampling, loudness, WAV writing), with separate() replaced: it
+hands the whole song to demucscpp::demucs_inference in one call, as
+upstream's own command-line tool does. That separation runs on one thread and
+holds the whole song in memory. Upstream picks its random time shift with
+rand(); the wrapper seeds it with srand(1) so runs repeat.

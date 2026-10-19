@@ -1,0 +1,2 @@
+From commit f30def3fe94732c38bd707000d1d0d28ad10a6ea (StemDeck for Android: on-device port, stage 1), release tags: none.
+Files as they were at that commit: engine.cpp, engine.hpp and demucs/ (and sdprof.cpp where it existed).

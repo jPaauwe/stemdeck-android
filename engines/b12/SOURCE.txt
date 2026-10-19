@@ -1,0 +1,2 @@
+From commit bfd5519ca0b77fda4cfd261e139168a3b1d60bc8 (Engine: rewrite norms, glu, layer scale, attention and stride-1 convs), release tags: build-12.
+Files as they were at that commit: engine.cpp, engine.hpp and demucs/ (and sdprof.cpp where it existed).

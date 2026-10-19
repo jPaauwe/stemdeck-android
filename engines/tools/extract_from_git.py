@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Collects every distinct engine version from the git history for the
-StemDeck Compare app.
+"""Exports every distinct engine version from the git history. This is how
+the folders in engines/ were made; use it to add a new build's engine there.
 
 For each `build-N` tag, the engine sources (engine.cpp, engine.hpp and the
 demucs/ folder) are located: under engine/ since build 12, under
@@ -11,7 +11,7 @@ added as "this build" when it differs from the newest tag.
 Writes <out>/<id>/{engine.cpp, engine.hpp, demucs/...} per version, plus
 <out>/engines.txt with one line per version: id|label|description.
 
-usage: collect_engines.py <repo root> <out dir> [--max N]
+usage: extract_from_git.py <repo root> <out dir> [--max N]
 """
 import argparse
 import hashlib

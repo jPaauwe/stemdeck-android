@@ -1,7 +1,9 @@
 package org.stemdeckport.bench
 
-/** The same native API, implemented by two engines (see bench_jni.cpp). */
+/** The same native API, implemented by each engine (see bench_jni.cpp). */
 interface EngineNative {
+    /** Short id, used in file names. */
+    val key: String
     val label: String
     fun load(path: String): String
     fun free()
@@ -11,10 +13,11 @@ interface EngineNative {
     fun separate(model: String, song: String, outDir: String, threads: Int, chunkSeconds: Int): String
 }
 
-/** The engine being optimized, with per-operation profiling. */
+/** The app's engine (build 13), with per-operation profiling. */
 object OptNative : EngineNative {
     init { System.loadLibrary("sdbench_opt") }
-    override val label = "optimized"
+    override val key = "app"
+    override val label = "app engine (build 13)"
     @JvmStatic external fun nLoad(path: String): String
     @JvmStatic external fun nFree()
     @JvmStatic external fun nProfile(out: String): String
@@ -30,10 +33,31 @@ object OptNative : EngineNative {
         nSeparate(model, song, outDir, threads, chunkSeconds)
 }
 
-/** The engine as shipped in build-10, frozen. */
+/** The first released engine, builds 4–10 (engines/b4). */
 object BaseNative : EngineNative {
     init { System.loadLibrary("sdbench_base") }
-    override val label = "baseline"
+    override val key = "b4"
+    override val label = "builds 4–10"
+    @JvmStatic external fun nLoad(path: String): String
+    @JvmStatic external fun nFree()
+    @JvmStatic external fun nProfile(out: String): String
+    @JvmStatic external fun nWriteSong(path: String, seconds: Double): Boolean
+    @JvmStatic external fun nCompare(a: String, b: String): String
+    @JvmStatic external fun nSeparate(model: String, song: String, outDir: String, threads: Int, chunk: Int): String
+    override fun load(path: String) = nLoad(path)
+    override fun free() = nFree()
+    override fun profile(out: String) = nProfile(out)
+    override fun writeSong(path: String, seconds: Double) = nWriteSong(path, seconds)
+    override fun compare(a: String, b: String) = nCompare(a, b)
+    override fun separate(model: String, song: String, outDir: String, threads: Int, chunkSeconds: Int) =
+        nSeparate(model, song, outDir, threads, chunkSeconds)
+}
+
+/** Upstream demucs.cpp, unmodified (engines/original). Separates on one thread. */
+object OrigNative : EngineNative {
+    init { System.loadLibrary("sdbench_orig") }
+    override val key = "original"
+    override val label = "original demucs.cpp"
     @JvmStatic external fun nLoad(path: String): String
     @JvmStatic external fun nFree()
     @JvmStatic external fun nProfile(out: String): String

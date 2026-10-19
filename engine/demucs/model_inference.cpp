@@ -1,4 +1,3 @@
-#include "permute.hpp"
 #include "crosstransformer.hpp"
 #include "dsp.hpp"
 #include "encdec.hpp"
@@ -297,7 +296,7 @@ void demucscpp::model_inference(
 
         // swap axis
         Eigen::array<int, 3> perm = {1, 0, 2};
-        Eigen::Tensor3dXf x_3_swapped = demucscpp::permute3(buffers.x_3, perm);
+        Eigen::Tensor3dXf x_3_swapped = buffers.x_3.shuffle(perm);
         // now unflatten last 2 dims from 1, 2688 to 8, 336
 
         Eigen::Tensor3dXf x_3_reshaped =

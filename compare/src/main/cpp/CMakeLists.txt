@@ -11,21 +11,24 @@ if(NOT EXISTS "${EIGEN_DIR}/Eigen/Dense")
   message(FATAL_ERROR "Eigen not found at ${EIGEN_DIR}. Run: git submodule update --init")
 endif()
 
-# Every distinct engine version from the git history (build-N tags), plus
-# this build's engine when it differs. See compare/scripts/collect_engines.py.
+# The engines kept for comparison (engines/engines.txt, marked "yes"), plus
+# this build's engine when it is not one of them.
+# See compare/scripts/engines_for_compare.py.
 set(ENGINES_DIR "${CMAKE_BINARY_DIR}/engines")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 execute_process(
-  COMMAND "${Python3_EXECUTABLE}" "${REPO_ROOT}/compare/scripts/collect_engines.py"
+  COMMAND "${Python3_EXECUTABLE}" "${REPO_ROOT}/compare/scripts/engines_for_compare.py"
           "${REPO_ROOT}" "${ENGINES_DIR}"
   RESULT_VARIABLE collect_result
   OUTPUT_VARIABLE collect_output
   ERROR_VARIABLE collect_error)
 if(NOT collect_result EQUAL 0)
-  message(FATAL_ERROR "collecting engine versions failed:\n${collect_error}")
+  message(FATAL_ERROR "listing the engines failed:\n${collect_error}")
 endif()
-message(STATUS "Engine versions:\n${collect_output}")
+message(STATUS "Engines:\n${collect_output}")
 file(STRINGS "${ENGINES_DIR}/engines.txt" engine_lines ENCODING UTF-8)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${REPO_ROOT}/engines/engines.txt")
 
 find_library(log-lib log)
 
@@ -36,7 +39,9 @@ foreach(line IN LISTS engine_lines)
   endif()
   string(REPLACE "|" ";" fields "${line}")
   list(GET fields 0 id)
-  set(src "${ENGINES_DIR}/${id}")
+  list(GET fields 1 label)
+  list(GET fields 2 description)
+  list(GET fields 3 src)
   file(GLOB demucs_srcs "${src}/demucs/*.cpp")
   add_library(sdengine_${id} SHARED plugin.cpp ${demucs_srcs})
   target_include_directories(sdengine_${id} PRIVATE "${src}" "${src}/demucs" "${EIGEN_DIR}")
@@ -49,8 +54,8 @@ foreach(line IN LISTS engine_lines)
   target_link_libraries(sdengine_${id} ${log-lib})
   target_link_options(sdengine_${id} PRIVATE
     "-Wl,-z,max-page-size=16384" "-Wl,--exclude-libs,ALL" "-Wl,-Bsymbolic")
-  # The line goes into the host library, escaped for a C string.
-  string(REPLACE "\\" "\\\\" esc "${line}")
+  # id|label|description goes into the host library, escaped for a C string.
+  string(REPLACE "\\" "\\\\" esc "${id}|${label}|${description}")
   string(REPLACE "\"" "\\\"" esc "${esc}")
   string(APPEND list_text "${esc}\\n")
 endforeach()

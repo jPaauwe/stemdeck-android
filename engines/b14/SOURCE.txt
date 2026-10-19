@@ -1,0 +1,2 @@
+From commit e24dd04fa074cc16a33173c261d6927d3d43b858 (Engine: vectorized GELU, blocked transposes for layout permutes), release tags: build-14.
+Files as they were at that commit: engine.cpp, engine.hpp and demucs/ (and sdprof.cpp where it existed).
