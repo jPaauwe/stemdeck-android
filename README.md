@@ -85,7 +85,9 @@ computer build 13 separated a song about 4x faster than the original
 demucs.cpp (on 2 threads; the original uses 1), with the same output when
 given the same time shift.
 Every earlier engine is kept in [`engines/`](engines/README.md), with the
-measurements. CI checks the engine on every push (`scripts/engine_test.py`
+measurements. The newest engine, with Demucs v4.1.0's weights, is also
+published on its own as a library for other apps:
+[demucs-android](https://github.com/jPaauwe/demucs-android). CI checks the engine on every push (`scripts/engine_test.py`
 and the host benchmark in `engine/test/bench_cli.cpp`): separation with the
 real model, and the app's engine against the first released one.
 
