@@ -249,7 +249,9 @@ jobs:
                     "audio/admiralbob77_-_Choice_-_Drum-bass.hq.ogg" \
             2>&1 | grep -v -i -E "warning|autocast|it/s\]" | tee sections-parity.log
       - name: Click scheduler (JS) against the shared fixture
-        run: node scripts/js/click_parity.test.mjs | tee click-js.log
+        run: |
+          set -o pipefail
+          { node scripts/js/click_parity.test.mjs; node scripts/js/lyrics-lookup.test.mjs; } | tee click-js.log
       - name: Mobile UI (Playwright, 384 x 640/740/832)
         run: |
           set -o pipefail
