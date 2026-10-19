@@ -54,6 +54,13 @@ GRID = {
 }
 
 
+SECTIONS = [
+    {"id": "auto-001", "name": "Intro", "kind": "intro", "start": 0.0, "end": 8.0, "color": "#4a7fff"},
+    {"id": "auto-002", "name": "Chorus", "kind": "chorus", "start": 8.0, "end": 14.0, "color": "#9a4aff"},
+    {"id": "auto-003", "name": "Chorus", "kind": "chorus", "start": 14.0, "end": 24.0, "color": "#9a4aff"},
+]
+
+
 def job(jid: str, title: str, with_grid: bool) -> dict:
     return {
         "job_id": jid, "status": "done", "progress": 1.0, "stage": "Done", "title": title,
@@ -66,14 +73,22 @@ def job(jid: str, title: str, with_grid: bool) -> dict:
         "has_video": False, "has_lyrics": False, "error": None, "compute_device": "test",
         "trashed_at": None, "favorite": False, "created_at": 2.0 if with_grid else 1.0, "stem_format": "wav",
         "analysis_notes": {} if with_grid else {"beats": "No beat grid: only 3 beats detected."},
+        "sections": SECTIONS if with_grid else None, "sections_source": "automatic" if with_grid else None,
     }
 
 
 JOBS = [job("a1b2c3d4e5f6", "Grid Song", True), job("b1b2c3d4e5f6", "Old Song", False)]
+# A song after the lead/backing split: those two lanes replace Vocals.
+_split = job("c1b2c3d4e5f6", "Split Song", False)
+_split["stems"] += [{"name": n, "url": f"/api/jobs/c1b2c3d4e5f6/stems/vocals.wav"} for n in ("lead_vocals", "backing_vocals")]
+_split["vocal_split"] = "done"
+_split["created_at"] = 0.5
+JOBS.append(_split)
 
 
 class Api(BaseHTTPRequestHandler):
-    settings = {"stem_format": "mp3", "gpu": True, "click": {}}
+    # auto_sections left on by an "earlier session": the page must switch it off.
+    settings = {"stem_format": "mp3", "gpu": True, "click": {}, "auto_sections": True}
     puts: list = []
     downloads: list = []
 
@@ -100,12 +115,14 @@ class Api(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(Api.settings).encode(), "application/json")
         self.send(404, b"{}", "application/json")
 
+    do_POST = do_PUT
+
     def do_GET(self):
         path = self.path.split("?")[0]
         if path == "/" or path == "/mobile":
             return self.send(302, b"", "text/plain", {"Location": "/mobile/"})
         if path == "/api/config":
-            return self.send(200, json.dumps({"platform": "android", "models": {"separation": True, "beat": False}}).encode(), "application/json")
+            return self.send(200, json.dumps({"platform": "android", "models": {"separation": True, "beat": False, "sections": False}}).encode(), "application/json")
         if path == "/api/settings":
             return self.send(200, json.dumps(Api.settings).encode(), "application/json")
         if path == "/api/jobs":
@@ -192,6 +209,22 @@ def main() -> int:
             check(d.count("M") == len(BEATS), f"{h}: one tick per beat ({d.count('M')})")
             bars = page.get_attribute(".beat-strip .bs-bar", "d") or ""
             check(bars.count("M") == math.ceil(len(BEATS) / 4), f"{h}: one bar mark every 4 beats ({bars.count('M')})")
+            # Sections: one block each, desktop's names (numbered when repeated).
+            check(page.locator(".sec-block").count() == len(SECTIONS), f"{h}: one block per section")
+            names = [page.inner_text(f".sec-block[data-sec='{x['id']}']").strip() for x in SECTIONS]
+            check(names == ["Intro", "Chorus 1", "Chorus 2"], f"{h}: section names {names}")
+            page.click(".sec-block[data-sec='auto-002']")
+            page.wait_for_timeout(200)
+            check(page.inner_text(".wave-times .cur").strip() == "0:08", f"{h}: tapping a section seeks to its start ({page.inner_text('.wave-times .cur')})")
+            box = page.locator(".sec-block[data-sec='auto-003']").bounding_box()
+            page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            page.mouse.down(); page.wait_for_timeout(700); page.mouse.up()
+            check(page.locator(".sec-block.looped[data-sec='auto-003']").count() == 1, f"{h}: holding a section loops it")
+            check(page.inner_text(".wave-times .cur").strip() == "0:14", f"{h}: the loop starts at the section ({page.inner_text('.wave-times .cur')})")
+            box = page.locator(".sec-block[data-sec='auto-003']").bounding_box()
+            page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            page.mouse.down(); page.wait_for_timeout(700); page.mouse.up()
+            check(page.locator(".sec-block.looped").count() == 0, f"{h}: holding it again ends the loop")
             if shots:
                 page.screenshot(path=str(shots / f"mixer-{h}.png"), full_page=True)
             # Click on, then play: the scheduler makes oscillators.
@@ -239,11 +272,28 @@ def main() -> int:
             page.wait_for_selector(".t-play:not([disabled])", timeout=15000)
             check(page.locator(".click-row").count() == 0, f"{h}: no click controls without a grid")
             check("only 3 beats" in page.inner_text(".click-note"), f"{h}: says why there is no grid")
+            # The split song: Lead and Backing lanes instead of Vocals.
+            page.click("[data-action='tab'][data-tab='library']")
+            page.click(".track-load[data-id='c1b2c3d4e5f6']")
+            page.wait_for_selector(".t-play:not([disabled])", timeout=15000)
+            lanes = page.eval_on_selector_all("[data-action='mute']", "els => els.map(e => e.dataset.id)")
+            check("lead_vocals" in lanes and "backing_vocals" in lanes and "vocals" not in lanes, f"{h}: split lanes replace Vocals ({lanes})")
             # Extract, with the mini player showing: the button must be clear of it.
             page.click(".t-play")
             page.click("[data-action='tab'][data-tab='extract']")
             page.wait_for_selector(".mini")
             check("beat model" in page.inner_text(".model-note"), f"{h}: first-download note on Extract")
+            check(any(x.get("auto_sections") is False for x in Api.puts), f"{h}: a sections choice left on is switched off at start")
+            check(page.get_attribute("[data-action='auto-sections']", "aria-pressed") == "false", f"{h}: sections off by default")
+            page.click("[data-action='auto-sections']")
+            page.wait_for_timeout(200)
+            check(page.get_attribute("[data-action='auto-sections']", "aria-pressed") == "true", f"{h}: sections toggle on")
+            check(Api.settings.get("auto_sections") is True, f"{h}: sections choice saved to the app")
+            check("section model" in page.inner_text(".model-note"), f"{h}: section model download mentioned")
+            page.click("[data-action='vocalmode'][data-mode='split']")
+            check("on" in (page.get_attribute("[data-action='vocalmode'][data-mode='split']", "class") or ""), f"{h}: Lead + Backing selectable")
+            check("vocal split model" in page.inner_text(".model-note"), f"{h}: vocal split model download mentioned")
+            page.click("[data-action='vocalmode'][data-mode='all']")
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             page.wait_for_timeout(200)
             cta = page.locator("[data-action='split']").bounding_box()

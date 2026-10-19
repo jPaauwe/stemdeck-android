@@ -13,6 +13,8 @@
 #include "key.hpp"
 #include "ort.hpp"
 #include "pipeline.hpp"
+#include "sections.hpp"
+#include "vocal_split.hpp"
 #include "wav.hpp"
 
 #define LOG_TAG "StemDeckAnalysis"
@@ -145,4 +147,60 @@ Java_org_stemdeckport_android_engine_NativeAnalysis_nativeOrtVersion(JNIEnv* env
     } catch (const std::exception& e) {
         return env->NewStringUTF((std::string("unavailable: ") + e.what()).c_str());
     }
+}
+
+// Song sections: {"ok": true, "sections": [...], "timings": {...}} or {"ok": false, "why": "..."}.
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_stemdeckport_android_engine_NativeAnalysis_nativeSections(JNIEnv* env, jclass, jstring stemsDir,
+                                                                    jobjectArray folds, jdoubleArray beats,
+                                                                    jdouble confidence, jdouble duration, jint threads,
+                                                                    jobject listener) {
+    try {
+        std::vector<std::string> f;
+        for (jsize i = 0; i < env->GetArrayLength(folds); i++) {
+            auto js = (jstring)env->GetObjectArrayElement(folds, i);
+            f.push_back(str(env, js));
+            env->DeleteLocalRef(js);
+        }
+        std::vector<double> b;
+        if (beats) {
+            b.resize(env->GetArrayLength(beats));
+            env->GetDoubleArrayRegion(beats, 0, (jsize)b.size(), b.data());
+        }
+        sda::SectionsResult r = sda::run_sections(str(env, stemsDir), f, b, confidence, duration, threads,
+                                                  progress(env, listener, "Sections"));
+        char t[160];
+        snprintf(t, sizeof t, "{\"spectrogram\": %.2f, \"model\": %.2f, \"post\": %.3f}", r.t_spec, r.t_model, r.t_post);
+        std::string out = r.ok ? "{\"ok\": true, \"sections\": " + r.sections_json + ", \"timings\": " + t + "}"
+                               : "{\"ok\": false, \"why\": \"" + esc(r.why) + "\", \"timings\": " + t + "}";
+        LOGI("sections: %d, spectrogram %.2f s, model %.2f s", r.count, r.t_spec, r.t_model);
+        return env->NewStringUTF(out.c_str());
+    } catch (const sda::Cancelled&) {
+        throwNew(env, "java/util/concurrent/CancellationException", "cancelled");
+    } catch (const std::exception& e) {
+        throwNew(env, "java/lang/IllegalStateException", e.what());
+    }
+    return nullptr;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_stemdeckport_android_engine_NativeAnalysis_nativeVocalSplit(JNIEnv* env, jclass, jstring vocals, jstring lead,
+                                                                      jstring backing, jstring model, jint threads,
+                                                                      jobject listener) {
+    try {
+        sda::VocalSplitResult r = sda::split_vocals(str(env, vocals), str(env, lead), str(env, backing), str(env, model),
+                                                    threads, progress(env, listener, "Vocal split"));
+        char b[256];
+        if (r.ok)
+            snprintf(b, sizeof b, "{\"ok\": true, \"vocals_rms\": %.9g, \"lead_rms\": %.9g, \"backing_rms\": %.9g, \"model_seconds\": %.2f}",
+                     r.vocals_rms, r.lead_rms, r.backing_rms, r.t_model);
+        std::string out = r.ok ? std::string(b) : "{\"ok\": false, \"why\": \"" + esc(r.why) + "\"}";
+        LOGI("vocal split: %.1f s of audio, model %.1f s", r.seconds, r.t_model);
+        return env->NewStringUTF(out.c_str());
+    } catch (const sda::Cancelled&) {
+        throwNew(env, "java/util/concurrent/CancellationException", "cancelled");
+    } catch (const std::exception& e) {
+        throwNew(env, "java/lang/IllegalStateException", e.what());
+    }
+    return nullptr;
 }

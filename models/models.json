@@ -4,5 +4,53 @@
     "sha256": "94553b89d3d8eb5dbdbaea796583df6a6e6340b8b5488d48b04143a4c10d9729",
     "source": "Beat This! final0 checkpoint (github.com/CPJKU/beat_this, MIT), exported by scripts/export_models.py",
     "release": "models-1"
+  },
+  "allinone_harmonix_fold0.onnx": {
+    "bytes": 3151198,
+    "sha256": "7581c0c3cf74104342f6fe731fe3987870e6f3d6da7996177b0f5ed193646cde",
+    "source": "All-In-One harmonix-fold0 (github.com/mir-aidj/all-in-one, MIT per huggingface.co/taejunkim/allinone at 379e5fd), exported by scripts/export_models.py from all-in-one-infer 3.1.0",
+    "release": "models-1"
+  },
+  "allinone_harmonix_fold1.onnx": {
+    "bytes": 3151198,
+    "sha256": "7d45cd6421ccf8b6bd684e3bd626b708b4071ae9d1ea42d0737b87331e70d396",
+    "source": "All-In-One harmonix-fold1 (github.com/mir-aidj/all-in-one, MIT per huggingface.co/taejunkim/allinone at 379e5fd), exported by scripts/export_models.py from all-in-one-infer 3.1.0",
+    "release": "models-1"
+  },
+  "allinone_harmonix_fold2.onnx": {
+    "bytes": 3151198,
+    "sha256": "eb6de214aa957833bd6103a84d2c0f4bf72b2bdeab8af217f15ebbc8a0c24534",
+    "source": "All-In-One harmonix-fold2 (github.com/mir-aidj/all-in-one, MIT per huggingface.co/taejunkim/allinone at 379e5fd), exported by scripts/export_models.py from all-in-one-infer 3.1.0",
+    "release": "models-1"
+  },
+  "allinone_harmonix_fold3.onnx": {
+    "bytes": 3151198,
+    "sha256": "11dd0068462559280165296d87e5b0366edd12c38512511bc31aed650fbe51d3",
+    "source": "All-In-One harmonix-fold3 (github.com/mir-aidj/all-in-one, MIT per huggingface.co/taejunkim/allinone at 379e5fd), exported by scripts/export_models.py from all-in-one-infer 3.1.0",
+    "release": "models-1"
+  },
+  "allinone_harmonix_fold4.onnx": {
+    "bytes": 3151198,
+    "sha256": "df67e2ce1b9b1f5da2376940cefe104fb0e431daba3e17b38ebfb7daafc1c984",
+    "source": "All-In-One harmonix-fold4 (github.com/mir-aidj/all-in-one, MIT per huggingface.co/taejunkim/allinone at 379e5fd), exported by scripts/export_models.py from all-in-one-infer 3.1.0",
+    "release": "models-1"
+  },
+  "allinone_harmonix_fold5.onnx": {
+    "bytes": 3151198,
+    "sha256": "14158336792ebc5319dff0a129c85591e239ce16dde65321c46c7a548c413c25",
+    "source": "All-In-One harmonix-fold5 (github.com/mir-aidj/all-in-one, MIT per huggingface.co/taejunkim/allinone at 379e5fd), exported by scripts/export_models.py from all-in-one-infer 3.1.0",
+    "release": "models-1"
+  },
+  "allinone_harmonix_fold6.onnx": {
+    "bytes": 3151198,
+    "sha256": "43b2627438425db41c41c1e93a77b248a3ac32df5cfc47190b385752c0d3fb6a",
+    "source": "All-In-One harmonix-fold6 (github.com/mir-aidj/all-in-one, MIT per huggingface.co/taejunkim/allinone at 379e5fd), exported by scripts/export_models.py from all-in-one-infer 3.1.0",
+    "release": "models-1"
+  },
+  "allinone_harmonix_fold7.onnx": {
+    "bytes": 3151198,
+    "sha256": "c5709a1be3d2dcf2a1dd2b0acf279dc94b2649167b37d963bdf1f4af1af7c767",
+    "source": "All-In-One harmonix-fold7 (github.com/mir-aidj/all-in-one, MIT per huggingface.co/taejunkim/allinone at 379e5fd), exported by scripts/export_models.py from all-in-one-infer 3.1.0",
+    "release": "models-1"
   }
 }

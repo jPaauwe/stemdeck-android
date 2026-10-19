@@ -12,3 +12,4 @@ local.properties
 model/
 .DS_Store
 signing/*.jks
+__pycache__/

@@ -25,6 +25,7 @@ import org.stemdeckport.android.engine.Mp3Codec
 import org.stemdeckport.android.engine.NativeAnalysis
 import org.stemdeckport.android.engine.NativeEngine
 import org.stemdeckport.android.ui.MainActivity
+import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -121,10 +122,11 @@ class SeparationService : Service() {
         wake.acquire(6 * 60 * 60 * 1000L)
         try {
             while (true) {
-                val job = synchronized(lock) {
-                    app.store.nextQueued() ?: run { running = false; null }
+                // Songs first, then lead/backing splits asked for on done songs.
+                val next: Any = synchronized(lock) {
+                    app.store.nextQueued() ?: app.store.nextSplit() ?: run { running = false; null }
                 } ?: break
-                process(job)
+                if (next is Job) process(next) else splitVocals(next as String)
             }
         } finally {
             if (wake.isHeld) wake.release()
@@ -191,7 +193,9 @@ class SeparationService : Service() {
             val selected = job.selectedStems.filter { it in NativeEngine.SOURCES }.ifEmpty { NativeEngine.SOURCES }
             val stemsDir = store.stemsDir(id).apply { mkdirs() }
             val mp3 = job.format == "mp3"
-            val sepEnd = 0.80
+            // With sections the analysis gets a bigger share of the bar.
+            val withSections = job.autoSections
+            val sepEnd = if (withSections) 0.70 else 0.80
             // Every core, plus the GPU when it is on and passes its self-test.
             val useGpu = app.settings.gpu
             val compute = NativeEngine.computeInfo(useGpu)
@@ -219,10 +223,15 @@ class SeparationService : Service() {
             // 5. Analysis, each stage best-effort: a failure leaves that
             // feature unavailable (and says why) but never fails the song.
             val notes = LinkedHashMap<String, String>()
-            analyzeBeats(id, stemsDir, notes, ::set, stopped, 0.80, 0.90)
+            val beatEnd = if (withSections) 0.76 else 0.90
+            analyzeBeats(id, stemsDir, notes, ::set, stopped, sepEnd, beatEnd)
             lap("beatgrid")
-            analyzeKey(id, stemsDir, notes, ::set, 0.90)
+            analyzeKey(id, stemsDir, notes, ::set, beatEnd)
             lap("key")
+            if (withSections) {
+                analyzeSections(id, stemsDir, notes, ::set, stopped, 0.77, 0.93)
+                lap("sections")
+            }
             store.update(id) { it.analysisNotes = notes }
             for (s in NativeEngine.SOURCES) if (s !in written) File(stemsDir, "$s.wav").delete()
 
@@ -319,6 +328,128 @@ class SeparationService : Service() {
             Log.w(TAG, "beat grid failed for $id", e)
             notes["beats"] = "No beat grid: " + when (e) {
                 is java.io.IOException -> "the beat model could not be downloaded (${e.message})."
+                is OutOfMemoryError -> "the phone ran out of memory."
+                else -> (e.message ?: e.javaClass.simpleName) + "."
+            }
+        }
+    }
+
+    /**
+     * Desktop's on-demand lead/backing vocal split (POST /jobs/{id}/vocal-split,
+     * app/pipeline/vocal_split.py): UVR-MDX-NET Karaoke 2 on the vocals stem.
+     * The song stays done throughout; only vocal_split and the stage line
+     * move. Adds lead_vocals and backing_vocals in the song's format.
+     */
+    private fun splitVocals(id: String) {
+        val store = app.store
+        val job = store.get(id) ?: return
+        val stemsDir = store.stemsDir(id)
+        val tmp = File(store.workDir(id), "split").apply { deleteRecursively(); mkdirs() }
+        val stopped = { store.stopRequested(id) != null }
+        fun stage(text: String, p: Double, persist: Boolean = false) {
+            store.update(id, persist) { it.stage = text; it.progress = p }
+            notifyProgress(job.title, text, p)
+        }
+        try {
+            val dl = "Downloading the vocal split model (first time only, 53 MB)"
+            if (!app.models.isReady(Models.KARAOKE)) stage(dl, 0.0, true)
+            val model = app.models.ensure(Models.KARAOKE) { f -> stage(dl, 0.1 * f); !stopped() }
+            val vocals = if (job.format == "mp3") {
+                stage("Splitting lead/backing vocals...", 0.1, true)
+                File(tmp, "vocals.wav").also { Mp3Codec.decode(store.stemFile(id, "vocals"), it) { !stopped() } }
+            } else store.stemFile(id, "vocals")
+            if (!vocals.isFile) throw IllegalStateException("This song has no vocals stem to split.")
+            val lead = File(tmp, "lead_vocals.wav")
+            val backing = File(tmp, "backing_vocals.wav")
+            val why = StringBuilder()
+            val r = NativeAnalysis.vocalSplit(
+                vocals, lead, backing, model, app.separationThreads(),
+                { f, _ -> stage("Splitting lead/backing vocals...", 0.12 + 0.8 * f); !stopped() }, why,
+            ) ?: throw IllegalStateException("vocal split failed: $why")
+            val names = listOf("lead_vocals" to lead, "backing_vocals" to backing)
+            if (job.format == "mp3") {
+                stage("Saving MP3 stems", 0.93, true)
+                for ((name, wav) in names) Mp3Codec.encode(wav, File(stemsDir, "$name.mp3")) { !stopped() }
+            } else {
+                for ((name, wav) in names) {
+                    val dest = File(stemsDir, "$name.wav")
+                    if (!wav.renameTo(dest)) { wav.copyTo(dest, overwrite = true); wav.delete() }
+                }
+            }
+            // desktop's presence_for_split: the loudest stem's RMS is recovered from vocals.
+            val vocalsPct = job.stemPresence?.get("vocals")
+            val extra = if (vocalsPct != null && vocalsPct > 0 && r.vocalsRms > 0) {
+                val loudest = r.vocalsRms / (vocalsPct / 100.0)
+                if (loudest < 1e-9) emptyMap() else mapOf(
+                    "lead_vocals" to (r.leadRms / loudest * 100).roundToInt().coerceIn(0, 100),
+                    "backing_vocals" to (r.backingRms / loudest * 100).roundToInt().coerceIn(0, 100),
+                )
+            } else emptyMap()
+            store.update(id) {
+                it.stems = it.stems.filter { s -> s !in setOf("lead_vocals", "backing_vocals") } + listOf("lead_vocals", "backing_vocals")
+                if (extra.isNotEmpty()) it.stemPresence = (it.stemPresence ?: emptyMap()) + extra
+                it.vocalSplit = "done"
+                it.stage = "Done"
+                it.progress = 1.0
+            }
+        } catch (e: CancellationException) {
+            store.update(id) { it.vocalSplit = "none"; it.stage = "Done"; it.progress = 1.0 }
+        } catch (e: Throwable) {
+            Log.w(TAG, "vocal split failed for $id", e)
+            try {
+                File(stemsDir, "vocal_split_error.txt").writeText((e.message ?: e.javaClass.simpleName) + "\n")
+            } catch (_: Exception) {
+            }
+            store.update(id) { it.vocalSplit = "error"; it.stage = "Done"; it.progress = 1.0 }
+        } finally {
+            store.clearStop(id)
+            tmp.deleteRecursively()
+        }
+    }
+
+    /**
+     * Song sections (desktop's detect_sections): All-In-One on bass, drums,
+     * vocals and other + guitar + piano, refined against the beat grid.
+     * Downloads the section model on first use.
+     */
+    private fun analyzeSections(
+        id: String, stemsDir: File, notes: MutableMap<String, String>,
+        set: (String, String, Double, Boolean) -> Unit, stopped: () -> Boolean, from: Double, to: Double,
+    ) {
+        val store = app.store
+        try {
+            val duration = store.get(id)?.duration
+            if (duration == null || duration <= 0) {
+                notes["sections"] = "No sections: the song's length is unknown."
+                return
+            }
+            val dlStage = "Downloading the section model (first time only, 25 MB)"
+            if (!app.models.isReady(Models.SECTIONS)) set("analyzing", dlStage, from, true)
+            val folds = app.models.ensureAll(Models.SECTIONS) { f ->
+                set("analyzing", dlStage, from + 0.1 * (to - from) * f, false); !stopped()
+            }
+            val start = from + 0.1 * (to - from)
+            set("analyzing", "Finding the song's sections", start, true)
+            val grid = File(stemsDir, "beats.json").takeIf { it.isFile }?.let { JSONObject(it.readText()) }
+            val why = StringBuilder()
+            val r = NativeAnalysis.sections(
+                stemsDir, folds, grid, duration, 0,
+                { f, _ -> set("analyzing", "Finding the song's sections", start + (to - start) * f, false); !stopped() }, why,
+            )
+            if (r == null) {
+                notes["sections"] = "No sections: $why."
+                return
+            }
+            store.update(id) {
+                it.sections = r.sections
+                it.sectionsSource = "automatic"
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "sections failed for $id", e)
+            notes["sections"] = "No sections: " + when (e) {
+                is java.io.IOException -> "the section model could not be downloaded (${e.message})."
                 is OutOfMemoryError -> "the phone ran out of memory."
                 else -> (e.message ?: e.javaClass.simpleName) + "."
             }

@@ -28,12 +28,63 @@ class ModelManager(
             "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/beat_this_final0.onnx",
             "94553b89d3d8eb5dbdbaea796583df6a6e6340b8b5488d48b04143a4c10d9729",
         )
+
+        /** The section model's eight folds (the app's Models.SECTIONS). */
+        fun sections(context: Context) = listOf(
+            ModelManager(
+                context, "allinone_harmonix_fold0.onnx",
+                "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold0.onnx",
+                "7581c0c3cf74104342f6fe731fe3987870e6f3d6da7996177b0f5ed193646cde",
+            ),
+            ModelManager(
+                context, "allinone_harmonix_fold1.onnx",
+                "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold1.onnx",
+                "7d45cd6421ccf8b6bd684e3bd626b708b4071ae9d1ea42d0737b87331e70d396",
+            ),
+            ModelManager(
+                context, "allinone_harmonix_fold2.onnx",
+                "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold2.onnx",
+                "eb6de214aa957833bd6103a84d2c0f4bf72b2bdeab8af217f15ebbc8a0c24534",
+            ),
+            ModelManager(
+                context, "allinone_harmonix_fold3.onnx",
+                "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold3.onnx",
+                "11dd0068462559280165296d87e5b0366edd12c38512511bc31aed650fbe51d3",
+            ),
+            ModelManager(
+                context, "allinone_harmonix_fold4.onnx",
+                "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold4.onnx",
+                "df67e2ce1b9b1f5da2376940cefe104fb0e431daba3e17b38ebfb7daafc1c984",
+            ),
+            ModelManager(
+                context, "allinone_harmonix_fold5.onnx",
+                "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold5.onnx",
+                "14158336792ebc5319dff0a129c85591e239ce16dde65321c46c7a548c413c25",
+            ),
+            ModelManager(
+                context, "allinone_harmonix_fold6.onnx",
+                "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold6.onnx",
+                "43b2627438425db41c41c1e93a77b248a3ac32df5cfc47190b385752c0d3fb6a",
+            ),
+            ModelManager(
+                context, "allinone_harmonix_fold7.onnx",
+                "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold7.onnx",
+                "c5709a1be3d2dcf2a1dd2b0acf279dc94b2649167b37d963bdf1f4af1af7c767",
+            ),
+        )
+
+        /** The lead/backing split model (the app's Models.KARAOKE). */
+        fun karaoke(context: Context) = ModelManager(
+            context, "UVR_MDXNET_KARA_2.onnx",
+            "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_KARA_2.onnx",
+            "bf32e15105a09c0f7dddd2b67346146334d6f3ecb399ed7638eba2ab07cbf5f4",
+        )
     }
 
     private val dir = File(context.filesDir, "models").apply { mkdirs() }
     val modelFile = File(dir, FILE_NAME)
 
-    fun isReady(): Boolean = modelFile.isFile && modelFile.length() > 1_000_000
+    fun isReady(): Boolean = modelFile.isFile && modelFile.length() > 1_000_000 // every model here is larger
 
     /**
      * Returns the model file, downloading it first if needed. [onProgress]

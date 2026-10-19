@@ -86,4 +86,8 @@ object AnalysisNative {
     /** JSON: seconds and the key, from <dir>/{guitar,piano,other,vocals,bass}.wav. */
     @JvmStatic external fun nKey(dir: String): String
     @JvmStatic external fun nOrtVersion(): String
+    /** JSON: seconds (spectrogram, eight folds, post-processing) and the section count. */
+    @JvmStatic external fun nSections(dir: String, folds: Array<String>, threads: Int): String
+    /** JSON: seconds (and in the model) for the lead/backing split of a vocals WAV. */
+    @JvmStatic external fun nVocalSplit(vocals: String, outDir: String, model: String, threads: Int): String
 }

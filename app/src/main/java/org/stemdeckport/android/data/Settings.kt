@@ -38,12 +38,21 @@ class Settings(context: Context) {
             prefs.edit().putString(KEY_CLICK, clean.toString()).apply()
         }
 
+    /**
+     * Find song sections for the next import (desktop's auto_sections). Not
+     * saved: like desktop it starts off every session, because the stage
+     * costs an extra model pass per song and should be asked for each time.
+     */
+    @Volatile var autoSections: Boolean = false
+
     fun toJson(): JSONObject = JSONObject().put("stem_format", stemFormat).put("gpu", gpu).put("click", click)
+        .put("auto_sections", autoSections)
 
     fun apply(o: JSONObject) {
         o.optString("stem_format").takeIf { it.isNotEmpty() }?.let { stemFormat = it }
         if (o.has("gpu")) gpu = o.optBoolean("gpu", true)
         o.optJSONObject("click")?.let { click = it }
+        if (o.has("auto_sections")) autoSections = o.optBoolean("auto_sections", false)
     }
 
     companion object {

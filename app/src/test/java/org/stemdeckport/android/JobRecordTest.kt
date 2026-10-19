@@ -40,4 +40,25 @@ class JobRecordTest {
         assertEquals("No beat grid: test.", back.analysisNotes["beats"])
         assertEquals(4.2, back.stageTimings["beatgrid"]!!, 0.0)
     }
+
+    @Test
+    fun sections_and_vocal_split_round_trip() {
+        val j = Job("a1b2c3d4e5f6", "New", "local:New", listOf("vocals"), 2.0)
+        j.sections = org.json.JSONArray("""[{"id":"auto-001","name":"Intro","kind":"intro","start":0.0,"end":8.0,"color":"#4a7fff"}]""")
+        j.sectionsSource = "automatic"
+        j.autoSections = true
+        j.vocalSplit = "done"
+        val back = Job.fromRecord(JSONObject(j.toRecord().toString()))
+        assertEquals("intro", back.sections!!.getJSONObject(0).getString("kind"))
+        assertEquals("automatic", back.sectionsSource)
+        assertTrue(back.autoSections)
+        assertEquals("done", back.vocalSplit)
+        // a split interrupted by the app closing is not still running
+        j.vocalSplit = "running"
+        assertEquals("none", Job.fromRecord(JSONObject(j.toRecord().toString())).vocalSplit)
+        val old = Job.fromRecord(JSONObject("""{"job_id":"b1b2c3d4e5f6","title":"Old"}"""))
+        assertNull(old.sections)
+        assertEquals("none", old.vocalSplit)
+        assertTrue(old.toState().isNull("sections"))
+    }
 }

@@ -109,6 +109,9 @@ fetch("/api/settings").then((r) => r.json()).then((s) => {
     if (Number.isInteger(c.count_in)) state.click.countIn = c.count_in;
     applyClickSettings();
   }
+  // Android: as desktop's wireAutoSectionsToggle, a sections choice left on by
+  // an earlier session does not survive into this one.
+  if (s && s.auto_sections) saveAutoSections(false);
   render();
 }).catch(() => {});
 // Android: which models the first song will download (the Extract screen says so).
@@ -146,7 +149,11 @@ const state = {
   // Android: the click track. `mult` (half/double time) is per song, as on desktop.
   click: { on: false, volume: 0.6, accent: -1, countIn: 0, mult: 1 },
   exportClick: false, // include the click in "Export mix" (opt-in, as on desktop)
-  models: null, // { separation, beat }: downloaded yet?
+  models: null, // { separation, beat, sections }: downloaded yet?
+  // Android: find song sections for the next import (desktop's auto_sections;
+  // off at every start and after each import, as on desktop).
+  autoSections: false,
+  loopSection: null, // Android: id of the section the transport loops, or null
 };
 
 let extractES = null; // EventSource for the active extraction
@@ -297,6 +304,67 @@ function armCountIn(startPos) {
   return true;
 }
 
+// Android: the sections choice for the next import lives on the server, which
+// is what the job reads when it is created (desktop's auto_sections).
+function saveAutoSections(next) {
+  state.autoSections = next;
+  return fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ auto_sections: next }) })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((d) => { state.autoSections = !!d.auto_sections; })
+    .catch(() => { state.autoSections = !next; if (next) toast("Couldn't save that."); })
+    .finally(() => { if (state.tab === "extract") render(); });
+}
+
+// Android: desktop's section names (static/js/sections.js sectionDisplayName):
+// the kind's name, numbered when the song has more than one of that kind.
+const SECTION_NAMES = {
+  intro: "Intro", outro: "Outro", break: "Break", bridge: "Bridge", inst: "Instrumental",
+  solo: "Solo", verse: "Verse", chorus: "Chorus", part: "Part",
+};
+function sectionName(sec, all) {
+  const kind = String(sec?.kind || "").toLowerCase();
+  const name = SECTION_NAMES[kind];
+  if (!name) return String(sec?.name || "");
+  const peers = [...all].sort((a, b) => a.start - b.start).filter((x) => String(x?.kind || "").toLowerCase() === kind);
+  if (peers.length < 2) return name;
+  const pos = peers.findIndex((x) => x.id === sec.id);
+  return pos < 0 ? name : `${name} ${pos + 1}`;
+}
+
+function currentSections() {
+  const list = state.current?.detail?.sections;
+  return Array.isArray(list) && list.length ? list : null;
+}
+
+// Android: the song's sections as coloured blocks over the waveform. Tap one to
+// play from its start; hold one to loop it (hold it again to stop looping).
+function sectionStrip() {
+  const list = currentSections();
+  const dur = curDuration();
+  if (!list || !dur) return "";
+  return `<div class="sec-strip" data-sections>${[...list].sort((a, b) => a.start - b.start).map((x) => {
+    const left = (Math.max(0, x.start) / dur) * 100;
+    const width = (Math.max(0, Math.min(dur, x.end) - Math.max(0, x.start)) / dur) * 100;
+    const looped = state.loopSection === x.id;
+    return `<div class="sec-block${looped ? " looped" : ""}" data-sec="${esc(x.id)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;--sc:${esc(x.color || "#8391a5")}" role="button" aria-label="${esc(sectionName(x, list))}${looped ? ", looping" : ""}"><span>${looped ? "⟲ " : ""}${esc(sectionName(x, list))}</span></div>`;
+  }).join("")}</div>`;
+}
+
+function setSectionLoop(sec) {
+  if (!engine) return;
+  if (!sec || state.loopSection === sec.id) {
+    state.loopSection = null;
+    engine.setLoop(false, 0, 0);
+    toast("Loop off");
+  } else {
+    state.loopSection = sec.id;
+    engine.setLoop(true, sec.start, sec.end);
+    engine.seek(sec.start);
+    toast(`Looping ${sectionName(sec, currentSections() || [])}`);
+  }
+  render();
+}
+
 // Beats and bar starts as a strip under the waveform (detected grid).
 function beatStrip() {
   const g = currentGrid();
@@ -425,6 +493,7 @@ async function openTrack(card, { autoplay = false } = {}) {
   const token = ++engineToken;
   pendingPlay = autoplay;
   state.click.mult = 1; // Android: half/double time is per song, as on desktop
+  state.loopSection = null; // Android: a new song starts without a loop
 
   // Android: the click track's beat grid, alongside the detail (404 when the
   // song has none, e.g. separated before 1.1).
@@ -478,6 +547,7 @@ async function openTrack(card, { autoplay = false } = {}) {
     hasVideo: !!detail.has_video,
     analysis: extractAnalysis(detail, laneList),
     notes: detail.analysis_notes || {}, // Android: why the beat grid or key is missing
+    sections: Array.isArray(detail.sections) ? detail.sections : null, // Android: automatic sections
   };
   state.current.loading = false;
   state.current.stemCount = laneList.length;
@@ -696,7 +766,8 @@ function analysisBody() {
   } else if (notes.beats) {
     gridHtml = `<div class="eyebrow">BEAT GRID</div><div class="grid-info"><div class="gi-sub">${esc(notes.beats)}</div></div>`;
   }
-  const keyNote = notes.key ? `<div class="grid-info" style="margin-top:8px"><div class="gi-sub">${esc(notes.key)}</div></div>` : "";
+  const keyNote = (notes.key ? `<div class="grid-info" style="margin-top:8px"><div class="gi-sub">${esc(notes.key)}</div></div>` : "") +
+    (notes.sections ? `<div class="grid-info" style="margin-top:8px"><div class="gi-sub">${esc(notes.sections)}</div></div>` : "");
   const clickOpt = g
     ? `<button class="check-row" data-action="export-click" aria-pressed="${state.exportClick}"><span class="check${state.exportClick ? " on" : ""}">${state.exportClick ? ICON.check : ""}</span>Include the click track</button>`
     : "";
@@ -760,6 +831,7 @@ function mixerScreen() {
         <div class="tags"><span class="tag">${esc(sourceTag)}</span>${stemTag ? `<span class="tag">${stemTag}</span>` : ""}</div>
       </div>
       <div class="wave">
+        ${sectionStrip() /* Android */}
         <div class="wave-bars" data-seek>${mainWaveform()}<div class="playhead" style="left:${state.progress * 100}%"></div></div>
         ${beatStrip() /* Android */}
         <div class="wave-times"><span class="cur">${fmt(state.progress * dur)}</span><span class="dur">${fmt(dur)}</span></div>
@@ -877,7 +949,13 @@ function extractScreen() {
         const onStyle = on ? `border-color:${s.color};background:${s.color}1c;` : "";
         return `<button class="chip-btn ${on ? "on" : ""}" style="${onStyle}" data-action="chip" data-id="${s.id}"><div class="dot" style="background:${s.color}"></div><span class="nm">${s.name}</span>${on ? ICON.check : ""}</button>`;
       }).join("")}</div>
-      <!-- Android: no lead/backing vocal split on the phone yet. -->
+      <div class="vocal-mode-row">
+        <span class="vocal-mode-label">Vocals</span>
+        <div class="segmented sm">
+          <button class="${state.selected.vocals && state.vocalSplitMode !== "split" ? "on" : ""}" data-action="vocalmode" data-mode="all">Combined</button>
+          <button class="${state.selected.vocals && state.vocalSplitMode === "split" ? "on" : ""}" data-action="vocalmode" data-mode="split">Lead + Backing</button>
+        </div>
+      </div>
       <!-- Android: the file format for stems and mix exports, remembered by the app. -->
       <div class="eyebrow">FILE FORMAT</div>
       <div class="chips">${STEM_FORMATS.map((f) => {
@@ -889,6 +967,8 @@ function extractScreen() {
         const on = state.processor === f.id;
         return `<button class="chip-btn ${on ? "on" : ""}" style="${on ? "border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.06);" : ""}" data-action="processor" data-id="${f.id}"><span class="nm">${f.name}<br><span style="font-size:11.5px;font-weight:500;color:var(--muted)">${f.note}</span></span>${on ? ICON.check : ""}</button>`;
       }).join("")}</div>
+      <div class="eyebrow">SONG SECTIONS</div>
+      <button class="check-row" data-action="auto-sections" aria-pressed="${state.autoSections}"><span class="check${state.autoSections ? " on" : ""}">${state.autoSections ? ICON.check : ""}</span>Find the sections (intro, verse, chorus…)</button>
       <button class="cta" style="margin-top:22px" data-action="split">${ICON.scissors}Extract stems</button>
       ${modelNote() /* Android */}
       ${extractProgressCard()}
@@ -907,6 +987,8 @@ function modelNote() {
   const need = [];
   if (!m.separation) need.push("the separation model (55 MB)");
   if (!m.beat) need.push("the beat model for the click track (82 MB)");
+  if (state.autoSections && !m.sections) need.push("the section model (25 MB)");
+  if (state.selected.vocals && state.vocalSplitMode === "split" && !m.vocal_split) need.push("the vocal split model (53 MB)");
   if (!need.length) return "";
   return `<div class="model-note">The first song downloads ${need.join(" and ")}, once.</div>`;
 }
@@ -932,7 +1014,7 @@ async function startExtraction() {
     title = url;
   }
 
-  const vocalSplitMode = "all"; // Android: no lead/backing split yet
+  const vocalSplitMode = state.selected.vocals ? state.vocalSplitMode : "all";
   state.extractJob = { id: null, title, status: "queued", progress: 0, stage: "Queued", vocalSplitMode };
   render();
 
@@ -951,6 +1033,7 @@ async function startExtraction() {
   }
 
   state.extractJob.id = jobId;
+  if (state.autoSections) saveAutoSections(false); // Android: the choice was for this import (desktop resets it too)
   state.extractFile = null;
   state.extractUrl = "";
   state.vocalSplitMode = "all";
@@ -1182,6 +1265,37 @@ async function deleteTrack(id) {
 // Faders + waveform seek need live pointer drag, so they're wired imperatively
 // after each render (the rest of the UI uses click delegation below).
 function wireFaders() {
+  // Android: section blocks. A tap plays from the section's start; holding
+  // one for half a second loops it (and holding it again stops the loop).
+  app.querySelectorAll("[data-sec]").forEach((el) => {
+    el.addEventListener("pointerdown", (e) => {
+      const list = currentSections();
+      const sec = list && list.find((x) => x.id === el.dataset.sec);
+      if (!sec || !engine) return;
+      e.preventDefault();
+      const x0 = e.clientX, y0 = e.clientY;
+      let held = false, gone = false;
+      const timer = setTimeout(() => { held = true; navigator.vibrate?.(15); setSectionLoop(sec); }, 500);
+      const mv = (ev) => { if (Math.abs(ev.clientX - x0) > 10 || Math.abs(ev.clientY - y0) > 10) { gone = true; clearTimeout(timer); } };
+      const up = () => {
+        clearTimeout(timer);
+        el.removeEventListener("pointermove", mv);
+        el.removeEventListener("pointerup", up);
+        el.removeEventListener("pointercancel", up);
+        if (held || gone) return;
+        const dur = curDuration();
+        // Outside a looped section the loop would pull playback straight back.
+        if (state.loopSection && state.loopSection !== sec.id) { state.loopSection = null; engine.setLoop(false, 0, 0); }
+        engine.seek(sec.start);
+        onEngineTime(sec.start);
+        if (dur) render();
+      };
+      el.addEventListener("pointermove", mv);
+      el.addEventListener("pointerup", up);
+      el.addEventListener("pointercancel", up);
+    });
+  });
+
   app.querySelectorAll("[data-fader]").forEach((el) => {
     el.addEventListener("pointerdown", (e) => {
       e.preventDefault();
@@ -1327,6 +1441,9 @@ app.addEventListener("click", (e) => {
     case "solo":
       state.solo[t.dataset.id] = !state.solo[t.dataset.id];
       applyMix();
+      break;
+    case "auto-sections": // Android
+      saveAutoSections(!state.autoSections);
       break;
     case "click-toggle": // Android
       state.click.on = !state.click.on;

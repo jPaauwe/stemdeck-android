@@ -1162,3 +1162,41 @@ button {
   color: var(--txt);
   box-shadow: none;
 }
+
+/* ── Android: song sections over the waveform ── */
+.sec-strip {
+  position: relative;
+  height: 22px;
+  margin-bottom: 6px;
+  touch-action: none;
+}
+.sec-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  border-left: 1px solid var(--bg, #0e0e12);
+  background: rgba(131, 145, 165, 0.3);
+  background: color-mix(in srgb, var(--sc) 30%, transparent);
+  border-bottom: 2px solid var(--sc);
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.sec-block span {
+  display: block;
+  padding: 3px 4px 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #e9e9ef;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sec-block.looped {
+  background: color-mix(in srgb, var(--sc) 55%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--sc);
+}

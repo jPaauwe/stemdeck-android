@@ -353,6 +353,36 @@ class BenchActivity : Activity() {
         val key = JSONObject(AnalysisNative.nKey(stems.path))
         if (key.has("error")) out("  key: failed: ${key.getString("error")}")
         else out("  key: %.2f s = %.3fx song length (%s)".format(key.getDouble("seconds"), key.getDouble("seconds") / songSeconds, key.getString("key")))
+
+        // Song sections (1.2): All-In-One, eight folds, on bass/drums/other+guitar+piano/vocals.
+        val folds = ModelManager.sections(this)
+        if (folds.any { !it.isReady() }) out("  Downloading the section model (25 MB, first run only)…")
+        val foldPaths = folds.map { it.ensure { true }.path }.toTypedArray()
+        for ((label, threads) in listOf("default threads" to 0, "4 threads" to 4, "8 threads" to 8)) {
+            val rss = PeakRss()
+            val js = JSONObject(AnalysisNative.nSections(stems.path, foldPaths, threads))
+            val peak = rss.finish()
+            if (js.has("error")) { out("  sections, %-16s failed: %s".format(label, js.getString("error"))); continue }
+            out("  sections, %-16s %6.2f s = %.3fx song length (eight folds %.2f s, spectrogram %.2f s)  %d sections  peak memory %.2f GB  thermal %s".format(
+                label, js.getDouble("seconds"), js.getDouble("seconds") / songSeconds, js.getDouble("model"), js.getDouble("spec"),
+                js.getInt("count"), peak / 1e6, thermal()))
+        }
+
+        // Lead/backing vocal split (1.2): UVR-MDX-NET Karaoke 2 on the vocals stem.
+        val kara = ModelManager.karaoke(this)
+        if (!kara.isReady()) out("  Downloading the vocal split model (53 MB, first run only)…")
+        val karaPath = kara.ensure { true }.path
+        val splitOut = File(work, "split").apply { mkdirs() }
+        run {
+            val rss = PeakRss()
+            val js = JSONObject(AnalysisNative.nVocalSplit(File(stems, "vocals.wav").path, splitOut.path, karaPath, 0))
+            val peak = rss.finish()
+            if (js.has("error")) out("  vocal split failed: ${js.getString("error")}")
+            else out("  vocal split: %.2f s = %.3fx song length (model %.2f s)%s  peak memory %.2f GB  thermal %s".format(
+                js.getDouble("seconds"), js.getDouble("seconds") / songSeconds, js.getDouble("model"),
+                if (js.getBoolean("ok")) "" else " (no split: ${js.getString("why")})", peak / 1e6, thermal()))
+        }
+        splitOut.deleteRecursively()
         stems.deleteRecursively()
     }
 

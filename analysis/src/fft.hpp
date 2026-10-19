@@ -32,6 +32,16 @@ class RealFFT {
         for (auto& v : out) v *= n;
     }
 
+    // irfft: real output of size n from a half spectrum of n/2+1 values,
+    // scaled by 1/n (numpy's and torch's "backward" norm). The imaginary
+    // parts of DC and Nyquist are ignored, as pocketfft's c2r does.
+    static void inverse_real(std::vector<std::complex<double>> half, std::vector<double>& out, int n) {
+        auto& fft = instance();
+        half[0] = std::complex<double>(half[0].real(), 0.0);
+        if (n % 2 == 0) half[n / 2] = std::complex<double>(half[n / 2].real(), 0.0);
+        fft.inv(out, half, n);
+    }
+
    private:
     static Eigen::FFT<double>& instance() {
         thread_local Eigen::FFT<double> fft;

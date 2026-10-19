@@ -4,10 +4,14 @@
 #include <chrono>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "key.hpp"
 #include "ort.hpp"
+#include "wav.hpp"
 #include "pipeline.hpp"
+#include "sections.hpp"
+#include "vocal_split.hpp"
 
 namespace {
 std::string str(JNIEnv* env, jstring s) {
@@ -66,5 +70,46 @@ Java_org_stemdeckport_bench_AnalysisNative_nOrtVersion(JNIEnv* env, jclass) {
         return env->NewStringUTF(sda::OrtModel::version().c_str());
     } catch (const std::exception& e) {
         return env->NewStringUTF((std::string("unavailable: ") + e.what()).c_str());
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_stemdeckport_bench_AnalysisNative_nSections(JNIEnv* env, jclass, jstring dir, jobjectArray folds, jint threads) {
+    auto t0 = std::chrono::steady_clock::now();
+    try {
+        std::vector<std::string> f;
+        for (jsize i = 0; i < env->GetArrayLength(folds); i++) {
+            auto js = (jstring)env->GetObjectArrayElement(folds, i);
+            f.push_back(str(env, js));
+            env->DeleteLocalRef(js);
+        }
+        std::string d = str(env, dir);
+        double dur = 0;
+        { sda::WavReader r(d + "/bass.wav"); dur = r.frames() / (double)r.sample_rate(); }
+        sda::SectionsResult r = sda::run_sections(d, f, {}, -1, dur, threads, nullptr);
+        double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        char buf[256];
+        std::snprintf(buf, sizeof buf, "{\"seconds\": %.3f, \"spec\": %.3f, \"model\": %.3f, \"post\": %.3f, \"count\": %d}",
+                      s, r.t_spec, r.t_model, r.t_post, r.count);
+        return env->NewStringUTF(buf);
+    } catch (const std::exception& e) {
+        return env->NewStringUTF(("{\"error\": \"" + esc(e.what()) + "\"}").c_str());
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_stemdeckport_bench_AnalysisNative_nVocalSplit(JNIEnv* env, jclass, jstring vocals, jstring outDir, jstring model, jint threads) {
+    auto t0 = std::chrono::steady_clock::now();
+    try {
+        std::string o = str(env, outDir);
+        sda::VocalSplitResult r = sda::split_vocals(str(env, vocals), o + "/lead_vocals.wav", o + "/backing_vocals.wav",
+                                                    str(env, model), threads, nullptr);
+        double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        char buf[256];
+        std::snprintf(buf, sizeof buf, "{\"seconds\": %.3f, \"model\": %.3f, \"ok\": %s, \"why\": \"%s\"}", s, r.t_model,
+                      r.ok ? "true" : "false", esc(r.why).c_str());
+        return env->NewStringUTF(buf);
+    } catch (const std::exception& e) {
+        return env->NewStringUTF(("{\"error\": \"" + esc(e.what()) + "\"}").c_str());
     }
 }

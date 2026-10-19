@@ -18,6 +18,7 @@ with its Python dependencies installed (CI uses its uv.lock).
 from __future__ import annotations
 
 import argparse
+import shutil
 import json
 import math
 import os
@@ -157,6 +158,211 @@ def compare_grids(ref: dict | None, mine: dict | None) -> dict:
     }
 
 
+# ── sections ──────────────────────────────────────────────────────────
+
+SIX = ("bass", "drums", "vocals", "other", "guitar", "piano")
+
+
+def fake_stems(src: str, dest: Path) -> None:
+    """Six 16-bit stems cut from one recording with filters: not a
+    separation, but real music for the model and the same files for both
+    sides, which is all a parity check needs."""
+    dest.mkdir(parents=True, exist_ok=True)
+    filters = {
+        "bass": "lowpass=f=180,lowpass=f=180", "drums": "highpass=f=4000,volume=1.5",
+        "vocals": "bandpass=f=1500:width_type=h:w=2000", "other": "volume=0.4",
+        "guitar": "bandpass=f=800:width_type=h:w=1200,volume=0.5", "piano": "highpass=f=300,volume=0.3",
+    }
+    for name, af in filters.items():
+        subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", src, "-af", af, "-ac", "2",
+                        "-ar", "44100", "-c:a", "pcm_s16le", str(dest / f"{name}.wav")], check=True)
+
+
+def reference_sections(stems: Path, work: Path, ckpt_dir: str, beats_json: Path | None) -> dict:
+    """What desktop's detect_sections does with these stems: the ffmpeg amix of
+    other/guitar/piano, then section_worker's body (the ensemble loaded from
+    local checkpoints instead of the Hub), then normalize_sections."""
+    import torch
+    from allin1_infer.config import HARMONIX_LABELS
+    from allin1_infer.helpers import run_inference
+    from allin1_infer.models.ensemble import Ensemble
+    from allin1_infer.models.loaders import NAME_TO_FILE, _build_model_from_checkpoint
+    from allin1_infer.spectrogram import extract_spectrograms
+    from app.pipeline.section_refine import refine_segments
+    from app.pipeline.section_worker import _load_beat_grid, _result_segments
+    from app.pipeline.sections import normalize_sections
+
+    wd = work / "sections-work"
+    if wd.exists():
+        shutil.rmtree(wd)
+    wd.mkdir(parents=True)
+    for name in ("bass", "drums", "vocals"):
+        shutil.copy(stems / f"{name}.wav", wd / f"{name}.wav")
+    cmd = ["ffmpeg", "-y", "-nostdin", "-loglevel", "error"]
+    for name in ("other", "guitar", "piano"):
+        cmd += ["-i", str(stems / f"{name}.wav")]
+    cmd += ["-filter_complex", "[0:a][1:a][2:a]amix=inputs=3:normalize=0:duration=longest", "-c:a", "pcm_f32le",
+            str(wd / "other.wav")]
+    subprocess.run(cmd, check=True)
+    spec_path = extract_spectrograms([wd], wd / "spec", multiprocess=False)[0]
+    folds = [_build_model_from_checkpoint(str(Path(ckpt_dir) / NAME_TO_FILE[f"harmonix-fold{k}"]), "cpu") for k in range(8)]
+    model = Ensemble(folds).eval()
+    with torch.no_grad():
+        result = run_inference(path=Path("x.wav"), spec_path=spec_path, model=model, device="cpu",
+                               include_activations=True, include_embeddings=True)
+        logits = model(torch.from_numpy(np.load(spec_path)).unsqueeze(0))
+    raw = _result_segments(result)
+    refined = refine_segments(raw, result.activations, result.embeddings, result.activation_fps,
+                              _load_beat_grid(beats_json), HARMONIX_LABELS)
+    frames = np.load(spec_path).shape[1]
+    return {
+        "features": np.load(spec_path).astype(np.float32),
+        "section": logits.logits_section[0].numpy().astype(np.float32),
+        "function": logits.logits_function[0].numpy().astype(np.float32),
+        "embedding": result.embeddings.astype(np.float64).mean(axis=-1),  # (4, T, 24), what refine reads
+        "raw": raw, "refined": refined, "frames": frames,
+        "normalize": lambda d: normalize_sections(refined, d),
+    }
+
+
+def label_overlap(a: list, b: list, duration: float) -> float:
+    """Share of the song's duration where both lists name the same kind."""
+    edges = sorted({0.0, duration, *(s["start"] for s in a + b), *(s["end"] for s in a + b)})
+    same = 0.0
+    for lo, hi in zip(edges, edges[1:]):
+        mid = (lo + hi) / 2
+        ka = next((s["kind"] for s in a if s["start"] <= mid < s["end"]), None)
+        kb = next((s["kind"] for s in b if s["start"] <= mid < s["end"]), None)
+        if ka is not None and ka == kb:
+            same += hi - lo
+    return same / duration if duration else 1.0
+
+
+def sections_stage(args, work: Path) -> list[str]:
+    failures = []
+    cases = [(Path(d).name + " (separated)", Path(d)) for d in args.stems]
+    for a in args.audio:
+        d = work / "fake-stems" / Path(a).stem
+        fake_stems(a, d)
+        cases.append((Path(a).name[:40] + " (filtered)", d))
+    print(f"\nSections (All-In-One harmonix-all + section_refine), {len(cases)} songs:")
+    print(f"{'case':52s} {'spec max':>9s} {'post':>5s} {'sections':>9s} {'bound max':>9s} {'labels':>7s}")
+    for name, stems in cases:
+        sd = work / "sec" / stems.name
+        sd.mkdir(parents=True, exist_ok=True)
+        # the beat grid both sides refine against: the port's (equal to desktop's, see the beatgrid stage)
+        grid_json = sd / "beats.json"
+        run([args.cli, "beatgrid", str(stems / "drums.wav"), args.beat_onnx, str(grid_json), "2"])
+        grid = json.loads(grid_json.read_text())
+        beats_txt = sd / "beats.txt"
+        conf = -1.0
+        if grid:
+            beats_txt.write_text("\n".join(repr(b) for b in grid["beats"]))
+            conf = float(grid["confidence"])
+        ref = reference_sections(stems, work, args.allinone_dir, grid_json if grid else None)
+        T = ref["frames"]
+        duration = T * 441 / 44100  # what the app passes: the stems' length
+        # 1. the model input
+        run([args.cli, "secfeat", str(stems), str(sd / "feat.f32")])
+        mine_feat = np.fromfile(sd / "feat.f32", np.float32)
+        spec_err = float(np.abs(mine_feat - ref["features"].ravel()).max()) if mine_feat.size == ref["features"].size else float("inf")
+        # 2. post-processing alone, from desktop's own ensemble outputs
+        ref["section"].tofile(sd / "sec.f32")
+        ref["function"].tofile(sd / "fun.f32")
+        np.ascontiguousarray(np.transpose(ref["embedding"], (1, 0, 2)).reshape(T, -1)).astype(np.float64).tofile(sd / "emb.f64")
+        run([args.cli, "secpost", str(sd / "sec.f32"), str(sd / "fun.f32"), str(sd / "emb.f64"), str(T),
+             str(beats_txt) if grid else "-", str(conf), repr(duration), str(sd / "post.json")])
+        post = json.loads((sd / "post.json").read_text())
+        ref_sections = ref["normalize"](duration)
+        post_same = (post["raw"] == ref["raw"] and post["refined"] == ref["refined"] and post["sections"] == ref_sections)
+        # 3. the whole stage
+        run([args.cli, "sections", str(stems), args.section_onnx, str(beats_txt) if grid else "-", str(conf),
+             repr(duration), str(sd / "full.json"), "2"])
+        full = json.loads((sd / "full.json").read_text())
+        mine = full["sections"]
+        same_count = len(mine) == len(ref_sections)
+        bmax = max((abs(x["start"] - y["start"]) for x, y in zip(mine, ref_sections)), default=0.0) if same_count else float("inf")
+        overlap = label_overlap(mine, ref_sections, duration) if (mine or ref_sections) else 1.0  # both found none
+        print(f"{name:52s} {spec_err:9.1e} {'same' if post_same else 'DIFF':>5s} "
+              f"{len(ref_sections):>4d}/{len(mine):<4d} {bmax:9.3f} {overlap:7.0%}")
+        if not post_same:
+            print("   desktop raw    ", ref["raw"]); print("   Android raw    ", post["raw"])
+            print("   desktop refined", ref["refined"]); print("   Android refined", post["refined"])
+            failures.append(f"{name}: post-processing differs given desktop's own model outputs")
+        if spec_err > 1e-5:
+            failures.append(f"{name}: spectrogram differs by {spec_err}")
+        if not same_count or bmax > 0.1 or overlap < 0.9:
+            print("   desktop", [(s["kind"], s["start"], s["end"]) for s in ref_sections])
+            print("   Android", [(s["kind"], s["start"], s["end"]) for s in mine])
+            failures.append(f"{name}: sections differ (count {len(ref_sections)}/{len(mine)}, boundaries {bmax:.3f} s, labels {overlap:.0%})")
+        print(f"   timings: spectrogram {full['t_spec']:.2f} s, eight folds {full['t_model']:.2f} s, post {full['t_post']:.3f} s for {duration:.0f} s of audio")
+    return failures
+
+
+# ── lead/backing vocal split ─────────────────────────────────────────
+
+
+def read_wav16(path: Path) -> np.ndarray:
+    with wave.open(str(path)) as w:
+        return np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(np.float64).reshape(-1, w.getnchannels())
+
+
+def snr_db(ref: np.ndarray, x: np.ndarray) -> float:
+    n = min(len(ref), len(x))
+    err = ((ref[:n] - x[:n]) ** 2).sum()
+    return float("inf") if err == 0 else float(10 * np.log10((ref[:n] ** 2).sum() / err))
+
+
+def vocalsplit_stage(args, work: Path) -> list[str]:
+    """audio-separator (UVR-MDX-NET Karaoke 2, desktop's vocal_split_worker
+    call) against the port, on each vocals stem."""
+    from audio_separator.separator import Separator
+
+    failures = []
+    cases = [(Path(d).name + " (separated)", Path(d) / "vocals.wav") for d in args.stems]
+    for a in args.audio:
+        d = work / "fake-stems" / Path(a).stem
+        if not (d / "vocals.wav").is_file():
+            fake_stems(a, d)
+        cases.append((Path(a).name[:40] + " (filtered)", d / "vocals.wav"))
+    print(f"\nLead/backing vocal split (UVR-MDX-NET Karaoke 2), {len(cases)} vocals stems:")
+    print(f"{'case':52s} {'lead SNR':>9s} {'backing SNR':>11s} {'same samples':>12s} {'lead+1.065 backing':>19s}")
+    sep = Separator(log_level=40, model_file_dir=args.karaoke_dir, output_dir=str(work / "vs-ref"), output_format="WAV")
+    sep.load_model(model_filename="UVR_MDXNET_KARA_2.onnx")
+    model = str(Path(args.karaoke_dir) / "UVR_MDXNET_KARA_2.onnx")
+    for name, vocals in cases:
+        ref_dir, my_dir = work / "vs-ref", work / "vs-mine"
+        for d in (ref_dir, my_dir):
+            shutil.rmtree(d, ignore_errors=True)
+            d.mkdir(parents=True)
+        sep.output_dir = str(ref_dir)
+        sep.model_instance.output_dir = str(ref_dir)
+        sep.separate(str(vocals), {"Vocals": "lead_vocals", "Instrumental": "backing_vocals"})
+        r = subprocess.run([args.cli, "vsplit", str(vocals), str(my_dir / "lead_vocals.wav"), str(my_dir / "backing_vocals.wav"), model, "2"],
+                           capture_output=True, text=True)
+        have_ref = all((ref_dir / f"{n}.wav").is_file() for n in ("lead_vocals", "backing_vocals"))
+        if r.returncode != 0 or not have_ref:
+            same = (r.returncode == 3) and not have_ref  # both found nothing to split
+            print(f"{name:52s} {'(no split on ' + ('either side' if same else 'one side') + ')':>40s}")
+            if not same:
+                failures.append(f"{name}: vocal split ran on one side only ({r.stderr.strip()})")
+            continue
+        lr, br = read_wav16(ref_dir / "lead_vocals.wav"), read_wav16(ref_dir / "backing_vocals.wav")
+        lm, bm = read_wav16(my_dir / "lead_vocals.wav"), read_wav16(my_dir / "backing_vocals.wav")
+        same = float(np.mean(np.concatenate([(lr == lm).ravel(), (br == bm).ravel()]))) if lr.shape == lm.shape and br.shape == bm.shape else 0.0
+        v = read_wav16(vocals)
+        # The model's two outputs are complementary by construction: lead = vocals - 1.065 x backing
+        # (each written with its own peak normalisation, so only check where none was applied).
+        recon = snr_db(v, lm + 1.065 * bm) if max(np.abs(v).max(), np.abs(lm).max(), np.abs(bm).max()) < 0.9 * 32767 else float("nan")
+        ls, bs = snr_db(lr, lm), snr_db(br, bm)
+        print(f"{name:52s} {ls:7.1f} dB {bs:9.1f} dB {same:12.4%} {recon:16.1f} dB")
+        if lr.shape != lm.shape or br.shape != bm.shape:
+            failures.append(f"{name}: vocal split lengths differ")
+        elif min(ls, bs) < 40:
+            failures.append(f"{name}: vocal split SNR {ls:.1f}/{bs:.1f} dB (< 40)")
+    return failures
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cli", required=True)
@@ -167,6 +373,10 @@ def main() -> int:
     ap.add_argument("--audio", nargs="*", default=[])
     ap.add_argument("--stages", default="beatgrid")
     ap.add_argument("--keep", default="")
+    ap.add_argument("--allinone-dir", help="the eight harmonix-fold*.pth checkpoints (sections stage)")
+    ap.add_argument("--section-onnx", help="folder with allinone_harmonix_fold0..7.onnx (sections stage)")
+    ap.add_argument("--stems", nargs="*", default=[], help="folders of real six-stem separations (sections stage)")
+    ap.add_argument("--karaoke-dir", help="folder with UVR_MDXNET_KARA_2.onnx for audio-separator (vocalsplit stage)")
     args = ap.parse_args()
 
     work = Path(args.keep or tempfile.mkdtemp(prefix="sda-parity-"))
@@ -365,6 +575,12 @@ def main() -> int:
         print(f"Click render against click_render.py: {cases} renders, largest sample difference {worst} (16-bit steps)")
         if worst > 1:
             failures.append(f"click render differs by up to {worst} steps")
+
+    if "sections" in stages:
+        failures += sections_stage(args, work)
+
+    if "vocalsplit" in stages:
+        failures += vocalsplit_stage(args, work)
 
     if failures:
         print("\nFAILED:")

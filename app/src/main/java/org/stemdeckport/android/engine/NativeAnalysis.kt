@@ -24,6 +24,13 @@ object NativeAnalysis {
         multiplier: Double, accent: Int, out: String,
     ): Boolean
     @JvmStatic private external fun nativeOrtVersion(): String
+    @JvmStatic private external fun nativeVocalSplit(
+        vocals: String, lead: String, backing: String, model: String, threads: Int, listener: ProgressListener?,
+    ): String
+    @JvmStatic private external fun nativeSections(
+        stemsDir: String, folds: Array<String>, beats: DoubleArray?, confidence: Double, duration: Double,
+        threads: Int, listener: ProgressListener?,
+    ): String
 
     class BeatGrid(val json: JSONObject, val tempoStability: Int?) {
         val bpm: Double get() = json.optDouble("bpm")
@@ -73,6 +80,51 @@ object NativeAnalysis {
             DoubleArray(beats.length()) { beats.getDouble(it) }, at, len, grid.optDouble("duration", 0.0),
             44100, multiplier, accent, out.path,
         )
+    }
+
+    class Sections(val sections: org.json.JSONArray, val timings: JSONObject)
+
+    /**
+     * Song sections (desktop's detect_sections) from the six stems in
+     * [stemsDir], refined against [grid] (beats.json) when there is one, or
+     * null with [why] set when no structure was found. Throws
+     * CancellationException when cancelled, IllegalStateException when the
+     * model cannot run.
+     */
+    fun sections(
+        stemsDir: File, folds: List<File>, grid: JSONObject?, duration: Double, threads: Int,
+        listener: ProgressListener, why: StringBuilder,
+    ): Sections? {
+        val beats = grid?.optJSONArray("beats")?.let { a -> DoubleArray(a.length()) { a.getDouble(it) } }
+        val confidence = grid?.optDouble("confidence", -1.0) ?: -1.0
+        val r = JSONObject(
+            nativeSections(stemsDir.path, folds.map { it.path }.toTypedArray(), beats, confidence, duration, threads, listener),
+        )
+        if (!r.optBoolean("ok")) {
+            why.append(r.optString("why", "no sections"))
+            return null
+        }
+        return Sections(r.getJSONArray("sections"), r.optJSONObject("timings") ?: JSONObject())
+    }
+
+    /** Stem RMS of the split's input and outputs, for stem presence. */
+    class VocalSplit(val vocalsRms: Double, val leadRms: Double, val backingRms: Double)
+
+    /**
+     * Desktop's lead/backing split of [vocals] (a 16-bit WAV) into two 16-bit
+     * WAVs, or null with [why] set when there is nothing to split. Throws
+     * CancellationException when cancelled, IllegalStateException when the
+     * model cannot run.
+     */
+    fun vocalSplit(
+        vocals: File, lead: File, backing: File, model: File, threads: Int, listener: ProgressListener, why: StringBuilder,
+    ): VocalSplit? {
+        val r = JSONObject(nativeVocalSplit(vocals.path, lead.path, backing.path, model.path, threads, listener))
+        if (!r.optBoolean("ok")) {
+            why.append(r.optString("why", "the split failed"))
+            return null
+        }
+        return VocalSplit(r.optDouble("vocals_rms"), r.optDouble("lead_rms"), r.optDouble("backing_rms"))
     }
 
     /** ONNX Runtime's version, or why it cannot be loaded. */

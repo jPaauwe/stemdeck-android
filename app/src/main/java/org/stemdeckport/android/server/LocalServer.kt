@@ -104,7 +104,9 @@ class LocalServer(
             val models = org.stemdeckport.android.App.instance.models
             return json(200, JSONObject().put("platform", "android").put("models", JSONObject()
                 .put("separation", models.isReady(org.stemdeckport.android.engine.Models.DEMUCS))
-                .put("beat", models.isReady(org.stemdeckport.android.engine.Models.BEAT_THIS))))
+                .put("beat", models.isReady(org.stemdeckport.android.engine.Models.BEAT_THIS))
+                .put("sections", models.isReady(org.stemdeckport.android.engine.Models.SECTIONS))
+                .put("vocal_split", models.isReady(org.stemdeckport.android.engine.Models.KARAOKE))))
         }
         // Android: app settings (the stem file format).
         if (parts[0] == "settings") {
@@ -148,8 +150,10 @@ class LocalServer(
                 store.requestStop(id, "cancelled")
                 json(200, JSONObject().put("ok", true))
             }
-            parts.size == 3 && parts[2] == "vocal-split" ->
-                json(501, detail("The lead/backing vocal split is not available on Android yet."))
+            // desktop's POST /jobs/{id}/vocal-split: runs in the background
+            // service (progress in the job's stage, cancellable), and this
+            // request answers when it is done, as desktop's does.
+            parts.size == 3 && parts[2] == "vocal-split" && method == Method.POST -> vocalSplit(job)
             parts.size == 3 && parts[2] == "mixdown.wav" -> mixdown(s, job)
             // Android 1.1: the click track's beat grid, and every stem in one ZIP.
             parts.size == 4 && parts[2] == "stems" && parts[3] == "beats.json" -> beatGrid(job)
@@ -183,9 +187,27 @@ class LocalServer(
         val staged = File(context.cacheDir, "upload-${System.nanoTime()}.${fileName.substringAfterLast('.', "bin").take(8)}")
         File(upload).copyTo(staged, overwrite = true)
         val format = s.parameters["format"]?.firstOrNull()?.takeIf { it in Settings.FORMATS } ?: settings.stemFormat
-        val job = store.create(titleFrom(fileName), "local:${fileName.substringBeforeLast('.')}", selected, staged, format)
+        // Captured now, like desktop: the sections choice belongs to this import.
+        val job = store.create(
+            titleFrom(fileName), "local:${fileName.substringBeforeLast('.')}", selected, staged, format, settings.autoSections,
+        )
         onJobQueued()
         return json(200, JSONObject().put("job_id", job.id).put("status", job.status))
+    }
+
+    private fun vocalSplit(job: Job): Response {
+        if (job.status != "done") return json(404, detail("job not found"))
+        if (job.vocalSplit == "running") return json(409, detail("vocal split already running"))
+        if (job.vocalSplit == "done") return json(202, job.toState())
+        if ("vocals" !in job.stems) return json(500, detail("vocal split failed"))
+        if (!store.queueSplit(job.id)) return json(409, detail("vocal split already running"))
+        onJobQueued()
+        val after = store.awaitSplit(job.id) ?: return json(404, detail("job not found"))
+        return when (after.vocalSplit) {
+            "done" -> json(200, after.toState())
+            "none" -> json(409, detail("vocal split cancelled"))
+            else -> json(500, detail("vocal split failed"))
+        }
     }
 
     private fun events(job: Job): Response {
@@ -241,7 +263,13 @@ class LocalServer(
     }
 
     private fun mixdown(s: IHTTPSession, job: Job): Response {
-        val names = s.parameters["stems"]?.firstOrNull()?.split(',')?.filter { it in job.stems } ?: job.stems
+        val split = setOf("lead_vocals", "backing_vocals")
+        val names = s.parameters["stems"]?.firstOrNull()?.split(',')?.filter { it in job.stems }
+            // lead/backing stand in for vocals once the split has run (desktop's buildPlaybackStems)
+            ?: job.stems.filter { !(it == "vocals" && job.stems.containsAll(split)) }
+        if ("vocals" in names && names.any { it in split }) {
+            return json(422, detail("vocals cannot be combined with lead_vocals/backing_vocals (same signal)"))
+        }
         val gains = s.parameters["gains"]?.firstOrNull()?.split(',')?.map { it.toFloatOrNull() ?: 1f }
         if (names.isEmpty()) return json(400, detail("nothing to mix"))
         val g = names.indices.map { gains?.getOrNull(it)?.coerceIn(0f, 2f) ?: 1f }
