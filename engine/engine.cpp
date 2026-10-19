@@ -1,6 +1,7 @@
 // StemDeck for Android: separation engine. See engine.hpp.
 #include "engine.hpp"
 
+#include "dsp.hpp"
 #include "model.hpp"
 #include "tensor.hpp"
 
@@ -483,6 +484,11 @@ SeparateResult separate(const std::string &preparedPath,
                         const std::string &outDir, const SeparateOptions &opts,
                         const ProgressFn &progress)
 {
+    // The whole song is cut into Demucs' own 7.8 s segments with 25 %
+    // overlap (split_inference in demucs.cpp), and worker threads take
+    // segments in turn. Each worker owns its segment buffers. Finished
+    // segments are blended into a sliding window with Demucs' triangular
+    // weights; samples no later segment can touch any more are written out.
     SeparateResult res;
     g_cancel.store(false);
 
@@ -511,8 +517,7 @@ SeparateResult separate(const std::string &preparedPath,
         return res;
     }
 
-    // Whole-track normalization statistics, as PyTorch Demucs computes them:
-    // ref = mix.mean(channels); mean and (unbiased) std of ref.
+    // Whole-track normalization, as PyTorch Demucs: ref = mix.mean(channels).
     double sum = 0.0, sumsq = 0.0;
     for (long i = 0; i < N; ++i)
     {
@@ -523,18 +528,42 @@ SeparateResult separate(const std::string &preparedPath,
     const double mean = sum / N;
     const double var = std::max(0.0, (sumsq - N * mean * mean) / (N - 1));
     const float refMean = static_cast<float>(mean);
-    const float refStd = static_cast<float>(std::sqrt(var));
+    float refStd = static_cast<float>(std::sqrt(var));
+    if (!(refStd > 1e-8f))
+        refStd = 1.0f;
 
-    const long O = kSampleRate; // 1 s of context on each side of a chunk
-    const long L = std::max<long>(4 * O, static_cast<long>(opts.chunkSeconds) * kSampleRate);
-    const int numChunks = static_cast<int>((N + L - 1) / L);
-    const int threads = std::max(1, std::min(opts.threads, numChunks));
-    const int maxAhead = threads + 1;
+    const int SEG = static_cast<int>(demucscpp::SEGMENT_LEN_SECS * demucscpp::SUPPORTED_SAMPLE_RATE);
+    const long STRIDE = static_cast<long>((1 - demucscpp::OVERLAP) * SEG);
 
-    auto ctxStart = [&](int k) { return std::max<long>(0, k * L - O); };
-    auto ctxEnd = [&](int k) { return std::min<long>(N, (k + 1) * L + O); };
+    // Demucs' "shift" (shifts=1): the track is padded with up to 0.5 s of
+    // silence in front, so the segment grid does not start on the first
+    // sample. Demucs picks the offset at random; it is derived from the
+    // length here so results are repeatable. Leaving the shift out measurably
+    // hurts separation (vocals leak into other), so it stays.
+    const long maxShift = static_cast<long>(demucscpp::MAX_SHIFT_SECS * demucscpp::SUPPORTED_SAMPLE_RATE);
+    const long lead = maxShift - static_cast<long>((static_cast<unsigned long long>(N) * 2654435761ULL) % maxShift);
+    const long NS = N + lead; // length of the shifted track
+    auto sampleAt = [&](long t, int ch) -> float {
+        // t is a position in the shifted track
+        const long i = t - lead;
+        return (i < 0 || i >= N) ? 0.0f : (pcm[2 * i + ch] - refMean) / refStd;
+    };
+    const int numSegs = static_cast<int>((NS + STRIDE - 1) / STRIDE);
+    const int threads = std::max(1, std::min(opts.threads, numSegs));
 
-    // Open outputs.
+    // Demucs' transition weight: a triangle over the segment.
+    std::vector<float> weight(SEG, 0.0f);
+    {
+        const int half = SEG / 2;
+        for (int k = 0; k < half; ++k)
+            weight[k] = static_cast<float>(k + 1);
+        for (int k = 0; k < half; ++k)
+            weight[SEG - 1 - k] = weight[k];
+        const float mx = *std::max_element(weight.begin(), weight.end());
+        for (float &v : weight)
+            v = std::pow(v / mx, demucscpp::TRANSITION_POWER);
+    }
+
     std::array<WavWriter, kNumSources> writers;
     for (int s = 0; s < kNumSources; ++s)
     {
@@ -550,76 +579,149 @@ SeparateResult separate(const std::string &preparedPath,
         }
     }
 
+    // Sliding blend window, starting at sample `base`: per source and
+    // channel the weighted sum, plus the summed weight.
     std::mutex m;
     std::condition_variable cv;
-    std::vector<std::unique_ptr<Eigen::Tensor3dXf>> results(numChunks);
-    std::vector<std::atomic<float>> chunkProgress(numChunks);
-    for (auto &c : chunkProgress)
-        c.store(0.0f);
-    std::atomic<int> nextChunk{0};
-    int written = 0; // guarded by m
-    std::string workerError; // guarded by m
+    long base = 0;                 // first sample not yet written
+    std::array<std::vector<float>, kNumSources * 2> acc;
+    std::vector<float> wsum;
+    std::vector<char> done(numSegs, 0);
+    int lowestPending = 0;         // first segment not yet blended
+    int inFlightLimit = threads + 2;
+    std::atomic<int> nextSeg{0};
+    std::atomic<int> segsDone{0};
+    std::string workerError;
+    bool writeOk = true;
+
+    auto ensureWindow = [&](long end) {
+        const size_t need = static_cast<size_t>(end - base);
+        if (wsum.size() < need)
+        {
+            wsum.resize(need, 0.0f);
+            for (auto &a : acc)
+                a.resize(need, 0.0f);
+        }
+    };
+
+    // Writes [base, upto) and drops it from the window. Called with m held.
+    std::vector<float> lineL, lineR;
+    auto flush = [&](long upto) {
+        const long n = upto - base;
+        if (n <= 0)
+            return;
+        // The first `lead` samples of the shifted track are the padding.
+        const long skip = std::max(0L, std::min(n, lead - base));
+        const long nOut = n - skip;
+        for (int s = 0; s < kNumSources && writeOk && nOut > 0; ++s)
+        {
+            if (!opts.write[s])
+                continue;
+            lineL.resize(nOut);
+            lineR.resize(nOut);
+            const float *aL = acc[2 * s].data() + skip, *aR = acc[2 * s + 1].data() + skip;
+            const float *wsp = wsum.data() + skip;
+            for (long i = 0; i < nOut; ++i)
+            {
+                const float w = wsp[i] > 0.0f ? 1.0f / wsp[i] : 0.0f;
+                // undo the normalization: x * std + mean
+                lineL[i] = aL[i] * w * refStd + refMean;
+                lineR[i] = aR[i] * w * refStd + refMean;
+            }
+            writeOk = writers[s].write(lineL.data(), lineR.data(), nOut);
+        }
+        wsum.erase(wsum.begin(), wsum.begin() + n);
+        for (auto &a : acc)
+            a.erase(a.begin(), a.begin() + n);
+        base = upto;
+    };
 
     auto worker = [&]() {
-        for (;;)
+        try
         {
-            const int k = nextChunk.fetch_add(1);
-            if (k >= numChunks || cancelled())
-                return;
+            demucscpp::demucs_segment_buffers buffers(2, SEG, kNumSources);
+            demucscpp::stft_buffers stft_buf(buffers.padded_segment_samples);
+            for (;;)
             {
-                std::unique_lock<std::mutex> lk(m);
-                cv.wait(lk, [&] { return k < written + maxAhead || cancelled(); });
-            }
-            if (cancelled())
-                return;
-            try
-            {
-                const long a = ctxStart(k), b = ctxEnd(k);
-                Eigen::MatrixXf seg(2, b - a);
-                for (long i = a; i < b; ++i)
+                const int k = nextSeg.fetch_add(1);
+                if (k >= numSegs || cancelled())
+                    return;
                 {
-                    seg(0, i - a) = pcm[2 * i];
-                    seg(1, i - a) = pcm[2 * i + 1];
+                    // Bound the blend window: do not run too far ahead of
+                    // the oldest unfinished segment.
+                    std::unique_lock<std::mutex> lk(m);
+                    cv.wait(lk, [&] { return k < lowestPending + inFlightLimit || cancelled(); });
                 }
-                demucscpp::ProgressCallback cb =
-                    [&chunkProgress, k](float p, const std::string &) {
-                        chunkProgress[k].store(std::max(0.0f, std::min(1.0f, p)));
-                        if (cancelled())
-                            throw Cancelled();
-                    };
-                auto out = std::make_unique<Eigen::Tensor3dXf>(
-                    demucscpp::demucs_inference_normalized(*model, seg, refMean,
-                                                           refStd, cb));
+                if (cancelled())
+                    return;
+
+                const long start = static_cast<long>(k) * STRIDE; // in the shifted track
+                const int len = static_cast<int>(std::min<long>(SEG, NS - start));
+                // symmetric zero padding of a short (last) segment
+                const int padL = (SEG - len) / 2;
+                buffers.mix.setZero();
+                for (int i = 0; i < len; ++i)
+                {
+                    buffers.mix(0, padL + i) = sampleAt(start + i, 0);
+                    buffers.mix(1, padL + i) = sampleAt(start + i, 1);
+                }
+                demucscpp::ProgressCallback cb = [](float, const std::string &) {
+                    if (cancelled())
+                        throw Cancelled();
+                };
+                demucscpp::model_inference(*model, buffers, stft_buf, cb, 0.0f, 1.0f);
+
                 std::lock_guard<std::mutex> lk(m);
-                results[k] = std::move(out);
-                chunkProgress[k].store(1.0f);
+                ensureWindow(start + len);
+                const long o = start - base;
+                for (int s = 0; s < kNumSources; ++s)
+                {
+                    if (!opts.write[s])
+                        continue;
+                    float *aL = acc[2 * s].data() + o, *aR = acc[2 * s + 1].data() + o;
+                    for (int i = 0; i < len; ++i)
+                    {
+                        aL[i] += weight[i] * buffers.targets_out(s, 0, padL + i);
+                        aR[i] += weight[i] * buffers.targets_out(s, 1, padL + i);
+                    }
+                }
+                float *ws = wsum.data() + o;
+                for (int i = 0; i < len; ++i)
+                    ws[i] += weight[i];
+                done[k] = 1;
+                while (lowestPending < numSegs && done[lowestPending])
+                    ++lowestPending;
+                // Everything before the start of the oldest unfinished
+                // segment is final.
+                const long final = lowestPending < numSegs
+                                       ? static_cast<long>(lowestPending) * STRIDE
+                                       : NS;
+                flush(final);
+                segsDone.fetch_add(1);
+                if (!writeOk)
+                    g_cancel.store(true);
                 cv.notify_all();
-            }
-            catch (const Cancelled &)
-            {
-                cv.notify_all();
-                return;
-            }
-            catch (const std::bad_alloc &)
-            {
-                std::lock_guard<std::mutex> lk(m);
-                if (workerError.empty())
-                    workerError = "The phone ran out of memory while separating. "
-                                  "Try fewer parallel threads in Settings.";
-                g_cancel.store(true);
-                cv.notify_all();
-                return;
-            }
-            catch (const std::exception &e)
-            {
-                std::lock_guard<std::mutex> lk(m);
-                if (workerError.empty())
-                    workerError = std::string("Separation failed: ") + e.what();
-                g_cancel.store(true);
-                cv.notify_all();
-                return;
             }
         }
+        catch (const Cancelled &)
+        {
+        }
+        catch (const std::bad_alloc &)
+        {
+            std::lock_guard<std::mutex> lk(m);
+            if (workerError.empty())
+                workerError = "The phone ran out of memory while separating. "
+                              "Try fewer parallel threads in Settings.";
+            g_cancel.store(true);
+        }
+        catch (const std::exception &e)
+        {
+            std::lock_guard<std::mutex> lk(m);
+            if (workerError.empty())
+                workerError = std::string("Separation failed: ") + e.what();
+            g_cancel.store(true);
+        }
+        cv.notify_all();
     };
 
     std::vector<std::thread> pool;
@@ -627,108 +729,24 @@ SeparateResult separate(const std::string &preparedPath,
     for (int t = 0; t < threads; ++t)
         pool.emplace_back(worker);
 
-    auto overall = [&]() {
-        float acc = 0.0f;
-        for (auto &c : chunkProgress)
-            acc += c.load();
-        return acc / numChunks;
-    };
-
-    // Overlap between chunk k-1 and k, kept from chunk k-1: per source, L and R.
-    std::array<std::vector<float>, kNumSources> tailL, tailR;
-    std::vector<float> lineL, lineR;
-    bool writeOk = true;
-
-    for (int k = 0; k < numChunks && writeOk; ++k)
+    // Report progress from this (the calling) thread only: the JNI callback
+    // must not run on a worker.
+    while (true)
     {
-        std::unique_ptr<Eigen::Tensor3dXf> out;
         {
             std::unique_lock<std::mutex> lk(m);
-            while (!results[k] && !cancelled())
-            {
-                cv.wait_for(lk, std::chrono::milliseconds(250));
-                if (results[k] || cancelled())
-                    break;
-                lk.unlock();
-                const bool keepGoing = progress(overall(), "Separating stems");
-                lk.lock();
-                if (!keepGoing)
-                {
-                    g_cancel.store(true);
-                    cv.notify_all();
-                }
-            }
-            if (!results[k])
-                break; // cancelled or a worker failed
-            out = std::move(results[k]);
+            cv.wait_for(lk, std::chrono::milliseconds(250));
         }
-
-        const long a = ctxStart(k);
-        const long e = ctxEnd(k);
-        const long ovEnd = (k > 0) ? ctxEnd(k - 1) : a; // blended region [a, ovEnd)
-        const long nextStart = (k + 1 < numChunks) ? ctxStart(k + 1) : e;
-        const long ov = ovEnd - a;
-
-        for (int s = 0; s < kNumSources && writeOk; ++s)
-        {
-            if (!opts.write[s])
-                continue;
-            const auto &T = *out;
-            // 1. blend the overlap with the previous chunk's tail
-            if (ov > 0)
-            {
-                lineL.resize(ov);
-                lineR.resize(ov);
-                for (long i = 0; i < ov; ++i)
-                {
-                    const float w = (static_cast<float>(i) + 0.5f) / ov;
-                    lineL[i] = tailL[s][i] * (1.0f - w) + T(s, 0, i) * w;
-                    lineR[i] = tailR[s][i] * (1.0f - w) + T(s, 1, i) * w;
-                }
-                writeOk = writers[s].write(lineL.data(), lineR.data(), ov);
-            }
-            // 2. the body, up to where the next chunk's context begins
-            const long bodyFrom = ovEnd, bodyTo = nextStart;
-            if (writeOk && bodyTo > bodyFrom)
-            {
-                const long n = bodyTo - bodyFrom;
-                lineL.resize(n);
-                lineR.resize(n);
-                for (long i = 0; i < n; ++i)
-                {
-                    lineL[i] = T(s, 0, bodyFrom - a + i);
-                    lineR[i] = T(s, 1, bodyFrom - a + i);
-                }
-                writeOk = writers[s].write(lineL.data(), lineR.data(), n);
-            }
-            // 3. keep the tail for the next chunk
-            if (k + 1 < numChunks)
-            {
-                const long n = e - nextStart;
-                tailL[s].resize(n);
-                tailR[s].resize(n);
-                for (long i = 0; i < n; ++i)
-                {
-                    tailL[s][i] = T(s, 0, nextStart - a + i);
-                    tailR[s][i] = T(s, 1, nextStart - a + i);
-                }
-            }
-        }
-        out.reset();
-        {
-            std::lock_guard<std::mutex> lk(m);
-            written = k + 1;
-        }
-        cv.notify_all();
-        if (writeOk && !progress(overall(), "Separating stems"))
+        const int d = segsDone.load();
+        if (d >= numSegs || cancelled())
+            break;
+        if (!progress(float(d) / numSegs, "Separating stems"))
         {
             g_cancel.store(true);
             cv.notify_all();
+            break;
         }
     }
-
-    if (!writeOk)
-        g_cancel.store(true);
     cv.notify_all();
     for (auto &t : pool)
         t.join();
@@ -736,12 +754,11 @@ SeparateResult separate(const std::string &preparedPath,
     bool complete;
     {
         std::lock_guard<std::mutex> lk(m);
-        complete = writeOk && written == numChunks && workerError.empty();
+        complete = writeOk && workerError.empty() && segsDone.load() == numSegs && base == NS;
         res.error = workerError;
     }
     if (!writeOk && res.error.empty())
         res.error = "Writing the stems failed (is the storage full?).";
-
     if (!complete)
     {
         res.cancelled = res.error.empty();

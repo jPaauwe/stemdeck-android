@@ -37,7 +37,7 @@ struct InputStats
 struct SeparateOptions
 {
     int threads = 3;            // chunks processed in parallel
-    int chunkSeconds = 30;      // length of each chunk handed to demucs
+    int chunkSeconds = 30;      // unused since segments are scheduled directly
     // Which of the six sources to write, in kSourceNames order.
     std::array<bool, kNumSources> write{{true, true, true, true, true, true}};
 };
