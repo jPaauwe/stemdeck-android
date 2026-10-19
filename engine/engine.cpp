@@ -4,6 +4,7 @@
 #include "dsp.hpp"
 #include "model.hpp"
 #include "gpu.hpp"
+#include "safetensors.hpp"
 #include "pool.hpp"
 #include "tensor.hpp"
 
@@ -246,7 +247,26 @@ std::string load_model(const std::string &path)
     try
     {
         auto model = std::make_unique<demucscpp::demucs_model>();
-        if (!demucscpp::load_demucs_model(path, model.get()))
+        // The weights as the Demucs project publishes them (v4.1.0 on,
+        // .safetensors), or demucs.cpp's own format.
+        bool loaded;
+        if (path.size() > 12 && path.compare(path.size() - 12, 12, ".safetensors") == 0)
+        {
+            const std::string tmp = path + ".ggml.tmp";
+            const std::string err = safetensors_to_ggml(path, tmp);
+            if (!err.empty())
+            {
+                std::remove(tmp.c_str());
+                return err;
+            }
+            loaded = demucscpp::load_demucs_model(tmp, model.get());
+            std::remove(tmp.c_str());
+        }
+        else
+        {
+            loaded = demucscpp::load_demucs_model(path, model.get());
+        }
+        if (!loaded)
             return "The separation model could not be read.";
         if (model->is_4sources)
             return "The model file is the 4-source model, not the 6-source one.";

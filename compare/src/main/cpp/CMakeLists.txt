@@ -43,7 +43,8 @@ foreach(line IN LISTS engine_lines)
   list(GET fields 2 description)
   list(GET fields 3 src)
   # compute/ (thread pool, GPU) exists from the all-cores + GPU engine on.
-  file(GLOB demucs_srcs "${src}/demucs/*.cpp" "${src}/compute/*.cpp")
+  # safetensors.cpp (reads Demucs v4.1.0's weight files) from the v4.1.0 engine on.
+  file(GLOB demucs_srcs "${src}/demucs/*.cpp" "${src}/compute/*.cpp" "${src}/safetensors.cpp")
   add_library(sdengine_${id} SHARED plugin.cpp ${demucs_srcs})
   target_include_directories(sdengine_${id} PRIVATE "${src}" "${src}/demucs" "${src}/compute" "${EIGEN_DIR}")
   target_compile_definitions(sdengine_${id} PRIVATE NDEBUG EIGEN_NO_DEBUG)

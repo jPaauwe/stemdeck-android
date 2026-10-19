@@ -18,7 +18,8 @@ from pathlib import Path
 
 def fingerprint(d: Path) -> str:
     h = hashlib.sha256()
-    files = [d / "engine.cpp", d / "engine.hpp"] + sorted((d / "demucs").glob("*")) + sorted((d / "compute").glob("*"))
+    files = ([d / "engine.cpp", d / "engine.hpp", d / "safetensors.cpp", d / "safetensors.hpp"]
+             + sorted((d / "demucs").glob("*")) + sorted((d / "compute").glob("*")))
     for f in files:
         if f.is_file() and f.name not in ("LICENSE", "UPSTREAM_COMMIT"):
             h.update(f.name.encode())
@@ -44,8 +45,9 @@ def main() -> int:
         if head.exists():
             shutil.rmtree(head)
         head.mkdir()
-        for name in ("engine.cpp", "engine.hpp"):
-            shutil.copy2(current / name, head / name)
+        for name in ("engine.cpp", "engine.hpp", "safetensors.cpp", "safetensors.hpp"):
+            if (current / name).is_file():
+                shutil.copy2(current / name, head / name)
         shutil.copytree(current / "demucs", head / "demucs")
         if (current / "compute").is_dir():
             shutil.copytree(current / "compute", head / "compute")

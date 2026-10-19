@@ -27,8 +27,8 @@ The app contains three engines (see [`engines/`](../engines/README.md)):
 
 - **original demucs.cpp**: upstream, unmodified (`engines/original`),
 - **builds 4–10**: the first released StemDeck engine (`engines/b4`),
-- **app engine**: the engine the app uses now (`/engine`): build 13 using
-  every core and the GPU.
+- **app engine**: the engine the app uses now (`/engine`): Demucs v4.1.0
+  with every optimization so far, including every core and the GPU.
 
 The report starts with what the app's engine runs on, for example
 `10 cores, GPU: Samsung Xclipse 940 (Vulkan 1.3)`, or why the GPU is not

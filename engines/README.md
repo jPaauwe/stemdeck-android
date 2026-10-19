@@ -12,9 +12,18 @@ them; `SOURCE.txt` in each folder says where it came from.
 | `b12` | 12 | Faster norms, GLU, layer scale, attention and stride-1 convolutions. Same output. | archived |
 | `b13` | 13, 20 | Demucs' own 7.8 s segments over the whole song with a time shift, as PyTorch Demucs does, plus build 12's speed-ups. | Compare |
 | `b14` | 14–19 | Build 13 plus vectorized GELU and blocked layout transposes. Same output. | archived |
-| `b13plus` | 23 on | Build 13 using **every core and the GPU**: a shared thread pool splits the maths inside each segment over all cores, and Vulkan compute shaders run the transformer and the large convolution products on the GPU. Same output as build 13. | **the app**, Compare, Bench |
+| `b13plus` | 23–24 | Build 13 using **every core and the GPU**: a shared thread pool splits the maths inside each segment over all cores, and Vulkan compute shaders run the transformer and the large convolution products on the GPU. Same output as build 13. | archived |
+| `v41` | 25 on | **Demucs v4.1.0 with every optimization so far**: build 13 + cores + GPU plus build 14's speed-ups, reading the weights file Demucs v4.1.0 publishes (`adefossez/HTDemucs-6s`, `5c90dfd2.safetensors`) directly. | **the app**, Compare, Bench |
 
-The app's engine is in `/engine` and is identical to `b13plus`.
+The app's engine is in `/engine` and is identical to `v41`.
+
+**About Demucs v4.1.0** ([adefossez/demucs](https://github.com/adefossez/demucs),
+July 2026): the model and how it is applied to a song (7.8 s segments, 25%
+overlap, one random time shift, triangular blending) are the same as in
+v4.0.1. The release changes packaging, moves the pretrained weights to the
+HuggingFace hub as safetensors, and fixes bugs outside the separation
+itself. So "incorporating v4.1.0" means using its published weights file;
+CI checks they are bit for bit the weights the earlier builds used.
 
 ## How they compare
 
@@ -44,7 +53,8 @@ own shift, so they differ from the original there.
 - **StemDeck Compare:** set the last field of its line in `engines.txt` to
   `yes`, and the next build bundles it.
 - **The app:** copy its `engine.cpp`, `engine.hpp` and `demucs/` over
-  `/engine` (and `sdprof.cpp`, if it has one).
+  `/engine` (and `sdprof.cpp`, `compute/` and `safetensors.*` where it has
+  them). Engines before `v41` read only demucs.cpp's ggml weights file.
 - **A new engine:** `tools/extract_from_git.py <repo> <out>` exports every
   distinct engine from the `build-*` tags. Add a new folder and a line to
   `engines.txt`.

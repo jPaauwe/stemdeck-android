@@ -16,6 +16,9 @@ concurrency:
 env:
   MODEL_URL: https://huggingface.co/datasets/Retrobear/demucs.cpp/resolve/8f58ac0491bbea657275bcd3e38af1ab3a27bfc9/ggml-model-htdemucs-6s-f16.bin
   MODEL_SHA256: 09704f4ceae204e56e77d5eefd6ac71d7275be81fd507e6913371d59abcee856
+  # Demucs v4.1.0's own htdemucs_6s weights (what the app downloads).
+  V41_URL: https://huggingface.co/adefossez/HTDemucs-6s/resolve/3c5ee475be622df764938de97e4281a7b07ffa58/5c90dfd2.safetensors
+  V41_SHA256: d2a1745f0744721f6b8ca5bf469b67c651ea5ed1b52998cab033b2158609d411
 
 jobs:
   engine:
@@ -49,6 +52,48 @@ jobs:
           if [ "$actual" != "$MODEL_SHA256" ]; then
             echo "::error::model checksum mismatch (got $actual)"; rm -f model/htdemucs-6s.bin; exit 1
           fi
+      - name: Cache the Demucs v4.1.0 weights
+        uses: actions/cache@v4
+        with:
+          path: model-v41
+          key: model-v41-${{ env.V41_SHA256 }}
+      - name: Download Demucs v4.1.0's weights and check them against the ggml file
+        run: |
+          mkdir -p model-v41
+          if [ ! -f model-v41/htdemucs_6s.safetensors ]; then
+            curl -fsSL --retry 3 -o model-v41/htdemucs_6s.safetensors "$V41_URL"
+          fi
+          actual=$(sha256sum model-v41/htdemucs_6s.safetensors | cut -d' ' -f1)
+          echo "sha256: $actual"
+          if [ "$actual" != "$V41_SHA256" ]; then
+            echo "::error::v4.1.0 weights checksum mismatch (got $actual)"; rm -f model-v41/htdemucs_6s.safetensors; exit 1
+          fi
+          pip install --quiet numpy
+          python3 - <<'PY' | tee weights-check.log
+          import json, struct, numpy as np
+          raw = open("model-v41/htdemucs_6s.safetensors", "rb").read()
+          n = struct.unpack_from("<Q", raw, 0)[0]
+          header = json.loads(raw[8:8 + n]); base = 8 + n
+          meta = header.pop("__metadata__", {})
+          print("v4.1.0 file:", meta.get("klass"), len(header), "tensors,",
+                sorted({v["dtype"] for v in header.values()}))
+          g = open("model/htdemucs-6s.bin", "rb").read(); i = 4; ggml = {}
+          while i < len(g):
+              nd, ln = struct.unpack_from("<ii", g, i); i += 8
+              dims = struct.unpack_from("<" + "i" * nd, g, i); i += 4 * nd
+              name = g[i:i + ln].decode(); i += ln
+              cnt = int(np.prod(dims)) if nd else 1
+              ggml[name] = np.frombuffer(g, np.float16, cnt, i); i += 2 * cnt
+          assert set(header) == set(ggml), f"tensor names differ: {set(header) ^ set(ggml)}"
+          differ = 0
+          for name, t in header.items():
+              a, b = t["data_offsets"]
+              v = np.frombuffer(raw[base + a:base + b], {"F16": np.float16, "F32": np.float32}[t["dtype"]])
+              if not np.array_equal(v.astype(np.float16).view(np.uint16), ggml[name].view(np.uint16)):
+                  differ += 1
+                  print("differs:", name)
+          print(f"{len(header) - differ} of {len(header)} tensors bit for bit identical to the ggml file")
+          PY
       - name: Keep a copy of the model in a release (for local profiling)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -88,7 +133,8 @@ jobs:
         run: |
           pip install --quiet numpy pyloudnorm
           set -o pipefail
-          python3 scripts/engine_test.py build/engine/sdengine_cli model/htdemucs-6s.bin build/engine-test 2>&1 | tee engine-test.log
+          # With Demucs v4.1.0's own weights file, as the app loads it.
+          python3 scripts/engine_test.py build/engine/sdengine_cli model-v41/htdemucs_6s.safetensors build/engine-test 2>&1 | tee engine-test.log
       - name: Benchmark one segment, builds 4-10 vs the app engine (CI host)
         run: |
           set -o pipefail

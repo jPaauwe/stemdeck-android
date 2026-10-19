@@ -1,0 +1,19 @@
+Demucs v4.1.0 (github.com/adefossez/demucs, 11 July 2026) with every
+StemDeck Android optimization so far. The app's engine from build 25 on.
+
+The model: htdemucs_6s, read directly from the weights Demucs v4.1.0
+publishes on the HuggingFace hub (adefossez/HTDemucs-6s, revision
+3c5ee475, checkpoint 5c90dfd2.safetensors, float16) by safetensors.cpp.
+v4.1.0 leaves the model and the way it is applied unchanged (segments of
+7.8 s with 25% overlap, one random time shift, triangular blending); its
+changes are packaging, the hub weights, and fixes outside separation. CI
+checks that these weights are bit for bit the ones the earlier builds used.
+
+The optimizations:
+- builds 4-10: transposed convolutions without im2col (~0.6 GB per thread)
+- build 12: faster norms, GLU, layer scale, attention, stride-1 convolutions
+- build 13: Demucs' own segments over the whole song, with the time shift
+- build 14: vectorized GELU, blocked layout transposes
+- build 23: every core (thread pool) and the GPU (Vulkan)
+
+Files as in /engine at the commit that added this folder.

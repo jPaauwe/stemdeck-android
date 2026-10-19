@@ -1,0 +1,105 @@
+// C = alpha * op(A) * op(B) + beta * C, all column-major float32.
+// op(X) is X or its transpose. Each 256-thread workgroup computes a 64x64
+// tile of C, 4x4 values per thread, stepping through K 16 at a time with
+// both tiles staged in shared memory.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer BufA { float a[]; };
+layout(std430, set = 0, binding = 1) readonly buffer BufB { float b[]; };
+layout(std430, set = 0, binding = 2) buffer BufC { float c[]; };
+
+layout(push_constant) uniform Params
+{
+    uint M, N, K;
+    uint lda, ldb, ldc;
+    uint offA, offB, offC;
+    uint transA, transB;
+    float alpha, beta;
+} p;
+
+const uint TM = 64;
+const uint TN = 64;
+const uint TK = 16;
+
+shared float As[TK][TM];
+shared float Bs[TK][TN];
+
+void main()
+{
+    const uint lx = gl_LocalInvocationID.x; // rows of C (m)
+    const uint ly = gl_LocalInvocationID.y; // columns of C (n)
+    const uint tid = ly * 16u + lx;
+    const uint m0 = gl_WorkGroupID.x * TM;
+    const uint n0 = gl_WorkGroupID.y * TN;
+
+    float acc[4][4];
+    for (uint i = 0u; i < 4u; ++i)
+        for (uint j = 0u; j < 4u; ++j)
+            acc[i][j] = 0.0;
+
+    for (uint k0 = 0u; k0 < p.K; k0 += TK)
+    {
+        // A tile: TM x TK = 1024 values, 4 per thread.
+        for (uint r = 0u; r < 4u; ++r)
+        {
+            const uint e = tid + r * 256u;
+            uint mm, kk;
+            if (p.transA == 0u) { mm = e % TM; kk = e / TM; } // m contiguous
+            else                { kk = e % TK; mm = e / TK; } // k contiguous
+            const uint gm = m0 + mm, gk = k0 + kk;
+            float v = 0.0;
+            if (gm < p.M && gk < p.K)
+                v = (p.transA == 0u) ? a[p.offA + gm + gk * p.lda]
+                                     : a[p.offA + gk + gm * p.lda];
+            As[kk][mm] = v;
+        }
+        // B tile: TK x TN = 1024 values, 4 per thread.
+        for (uint r = 0u; r < 4u; ++r)
+        {
+            const uint e = tid + r * 256u;
+            uint kk, nn;
+            if (p.transB == 0u) { kk = e % TK; nn = e / TK; } // k contiguous
+            else                { nn = e % TN; kk = e / TN; } // n contiguous
+            const uint gk = k0 + kk, gn = n0 + nn;
+            float v = 0.0;
+            if (gk < p.K && gn < p.N)
+                v = (p.transB == 0u) ? b[p.offB + gk + gn * p.ldb]
+                                     : b[p.offB + gn + gk * p.ldb];
+            Bs[kk][nn] = v;
+        }
+        barrier();
+
+        for (uint kk = 0u; kk < TK; ++kk)
+        {
+            float av[4], bv[4];
+            for (uint i = 0u; i < 4u; ++i)
+                av[i] = As[kk][lx + 16u * i];
+            for (uint j = 0u; j < 4u; ++j)
+                bv[j] = Bs[kk][ly + 16u * j];
+            for (uint i = 0u; i < 4u; ++i)
+                for (uint j = 0u; j < 4u; ++j)
+                    acc[i][j] = fma(av[i], bv[j], acc[i][j]);
+        }
+        barrier();
+    }
+
+    for (uint j = 0u; j < 4u; ++j)
+    {
+        const uint gn = n0 + ly + 16u * j;
+        if (gn >= p.N)
+            continue;
+        for (uint i = 0u; i < 4u; ++i)
+        {
+            const uint gm = m0 + lx + 16u * i;
+            if (gm >= p.M)
+                continue;
+            const uint idx = p.offC + gm + gn * p.ldc;
+            float v = p.alpha * acc[i][j];
+            if (p.beta != 0.0)
+                v += p.beta * c[idx];
+            c[idx] = v;
+        }
+    }
+}

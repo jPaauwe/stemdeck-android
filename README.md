@@ -15,7 +15,9 @@ StemDeck project.
    from the newest release (or open the repository's **Releases** page and tap
    it there).
 2. Allow your browser to install apps when Android asks (one time).
-3. Open StemDeck. The first separation downloads the model (about 55 MB).
+3. Open StemDeck. The first separation downloads the model (about 55 MB):
+   Demucs v4.1.0's `htdemucs_6s` weights, from the Demucs project's own
+   HuggingFace repository.
 
 Each push to `main` builds and publishes a new release. With the signing key
 in the repository secrets (see `signing/README.md`), every build is signed with
@@ -45,7 +47,7 @@ the same key, so a new APK installs over the old one and keeps your library.
 | Desktop StemDeck | This app |
 |---|---|
 | Python/FastAPI server | Kotlin server on `127.0.0.1` inside the app (`LocalServer.kt`), same API shape for the parts the mobile UI uses |
-| PyTorch Demucs `htdemucs_6s` | [demucs.cpp](https://github.com/sevagh/demucs.cpp), a C++ implementation of the same model and weights, compiled for arm64 and optimized for phones (`engine/`) |
+| PyTorch Demucs v4.1.0, `htdemucs_6s` | [demucs.cpp](https://github.com/sevagh/demucs.cpp), a C++ implementation of the same model, compiled for arm64 and optimized for phones (`engine/`). It reads the weights file Demucs v4.1.0 publishes ([adefossez/HTDemucs-6s](https://huggingface.co/adefossez/HTDemucs-6s), `5c90dfd2.safetensors`) as is |
 | FFmpeg decode | Android's built-in decoders (`AudioDecoder.kt`) and a windowed-sinc resampler to 44.1 kHz |
 | Mobile web UI (`static/mobile`) | The same UI, bundled in `app/src/main/assets/web` and shown in a WebView. Changes are marked `Android:` |
 | pyloudnorm | The same BS.1770 K-weighting and gating in C++ |
@@ -58,9 +60,10 @@ phone's memory), so memory stays flat however long the song is.
 
 ## Speed
 
-Separation is the slow part. The app's engine is **build 13** (Demucs' own
-segments over the whole song, with faster attention, convolutions and
-normalization), upgraded to use **every core and the GPU**:
+Separation is the slow part. The app's engine is **Demucs v4.1.0 with every
+optimization so far**: Demucs' own segments over the whole song, faster
+attention, convolutions, normalization and GELU, convolutions that need a
+third of the memory, and **every core and the GPU**:
 
 - **Every core:** the segments that fit in memory run side by side, and the
   heavy maths inside each one (matrix products, attention, norms,
@@ -73,7 +76,8 @@ normalization), upgraded to use **every core and the GPU**:
   on the CPU instead. *Processing* on the Extract screen switches the GPU
   off (*CPU only*), and the progress line shows what a song is separated on.
 
-The results are the same as build 13's, to float rounding. On a 2-core test
+The results are the same as the original demucs.cpp's, to float rounding,
+given the same time shift. On a 2-core test
 computer build 13 separated a song about 4x faster than the original
 demucs.cpp (on 2 threads; the original uses 1), with the same output when
 given the same time shift.
@@ -134,7 +138,8 @@ installs them on first sync). StemDeck Compare also needs Python 3.
   (`layers.cpp`) and `demucs_inference_normalized` (`model_apply.cpp`).
   Results match the original to float rounding. Each change is marked
   "StemDeck Android". The unmodified original is in `engines/original`.
-- Demucs and the `htdemucs_6s` weights: MIT, © Meta Platforms.
+- Demucs v4.1.0 ([adefossez/demucs](https://github.com/adefossez/demucs)) and
+  the `htdemucs_6s` weights: MIT, © Meta Platforms.
 - Eigen: MPL 2.0. NanoHTTPD: BSD 3-Clause.
 - [LAME](https://lame.sourceforge.io) 3.100, the MP3 encoder and decoder:
   LGPL 2.0 or later. It is not stored in this repository: the build downloads

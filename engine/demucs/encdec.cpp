@@ -1,4 +1,5 @@
 #include "encdec.hpp"
+#include "sdprof.hpp"
 #include "layers.hpp"
 #include "model.hpp"
 #include <Eigen/Core>
@@ -10,7 +11,7 @@ void demucscpp::apply_freq_encoder(const struct demucscpp::demucs_model &model,
                                    const Eigen::Tensor3dXf &x_in,
                                    Eigen::Tensor3dXf &x_out)
 {
-    Eigen::Tensor3dXf x_shuf = x_in.shuffle(Eigen::array<int, 3>({2, 0, 1}));
+    Eigen::Tensor3dXf x_shuf = demucscpp::permute3(x_in, {2, 0, 1});
 
     // 2D Convolution operation
     Eigen::Tensor3dXf y;
@@ -40,13 +41,13 @@ void demucscpp::apply_freq_encoder(const struct demucscpp::demucs_model &model,
     };
 
     // reverse all dims
-    Eigen::Tensor3dXf y_shuff = y.shuffle(Eigen::array<int, 3>({2, 1, 0}));
+    Eigen::Tensor3dXf y_shuff = demucscpp::permute3(y, {2, 1, 0});
     demucscpp::apply_dconv(model, y_shuff, 0, 0, encoder_idx,
                            y_shuff.dimension(2));
 
     // swap back from H,C,W to C,H,W
     // then put W in front to use conv1d function for width=1 conv2d
-    y = y_shuff.shuffle(Eigen::array<int, 3>({2, 1, 0}));
+    y = demucscpp::permute3(y_shuff, {2, 1, 0});
 
     // need rewrite, norm2, glu
     switch (encoder_idx)
@@ -73,7 +74,7 @@ void demucscpp::apply_freq_encoder(const struct demucscpp::demucs_model &model,
         break;
     };
 
-    y_shuff = y.shuffle(Eigen::array<int, 3>({1, 2, 0}));
+    y_shuff = demucscpp::permute3(y, {1, 2, 0});
 
     // copy into x_out
     x_out = demucscpp::glu(y_shuff, 0);
@@ -200,7 +201,7 @@ void demucscpp::apply_freq_decoder(const struct demucscpp::demucs_model &model,
 
     // swap first and second dimensions
     // from C,H,W into H,C,W
-    Eigen::Tensor3dXf y_shuff = y.shuffle(Eigen::array<int, 3>({1, 0, 2}));
+    Eigen::Tensor3dXf y_shuff = demucscpp::permute3(y, {1, 0, 2});
     y = y_shuff;
 
     // start the DConv
@@ -209,7 +210,7 @@ void demucscpp::apply_freq_decoder(const struct demucscpp::demucs_model &model,
     // dconv finished
 
     // swap back from H,C,W to C,H,W
-    Eigen::Tensor3dXf y_shuff_2 = y.shuffle(Eigen::array<int, 3>({1, 0, 2}));
+    Eigen::Tensor3dXf y_shuff_2 = demucscpp::permute3(y, {1, 0, 2});
 
     // now time for the transpose convolution
 

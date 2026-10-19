@@ -8,6 +8,7 @@
 #include "tensor.hpp"
 #include <Eigen/Dense>
 #include "sdprof.hpp"
+#include "permute.hpp"
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -443,7 +444,7 @@ Eigen::Tensor3dXf conv1d(const Eigen::Tensor3dXf &x, const Eigen::Tensor3dXf &w,
         {(int)w.dimension(0), (int)w.dimension(1), (int)w.dimension(2), 1}});
 
     // move 0 axis to the end
-    Eigen::Tensor3dXf x_shuff = x.shuffle(Eigen::array<int, 3>({1, 2, 0}));
+    Eigen::Tensor3dXf x_shuff = demucscpp::permute3(x, {1, 2, 0});
 
     // do 2d convolution inference here
     // treating the in_freq dimension as a width dimension with a no-op kernel
@@ -453,7 +454,7 @@ Eigen::Tensor3dXf conv1d(const Eigen::Tensor3dXf &x, const Eigen::Tensor3dXf &w,
 
     // move end axis to the front
     Eigen::Tensor3dXf y_out_shuf =
-        y_out.shuffle(Eigen::array<int, 3>({2, 0, 1}));
+        demucscpp::permute3(y_out, {2, 0, 1});
     return y_out_shuf;
 }
 
@@ -468,7 +469,7 @@ Eigen::Tensor3dXf conv1d_fused_gelu(const Eigen::Tensor3dXf &x,
         {(int)w.dimension(0), (int)w.dimension(1), (int)w.dimension(2), 1}});
 
     // move 0 axis to the end
-    Eigen::Tensor3dXf x_shuff = x.shuffle(Eigen::array<int, 3>({1, 2, 0}));
+    Eigen::Tensor3dXf x_shuff = demucscpp::permute3(x, {1, 2, 0});
 
     // do 2d convolution inference here
     // treating the in_freq dimension as a width dimension with a no-op kernel
@@ -479,7 +480,7 @@ Eigen::Tensor3dXf conv1d_fused_gelu(const Eigen::Tensor3dXf &x,
 
     // move end axis to the front
     Eigen::Tensor3dXf y_out_shuf =
-        y_out.shuffle(Eigen::array<int, 3>({2, 0, 1}));
+        demucscpp::permute3(y_out, {2, 0, 1});
     return y_out_shuf;
 }
 
@@ -680,7 +681,7 @@ Eigen::Tensor3dXf conv1d_tr(const Eigen::Tensor3dXf &x,
         {(int)w.dimension(0), (int)w.dimension(1), (int)w.dimension(2), 1}});
 
     // Move 0 axis to the end
-    Eigen::Tensor3dXf x_shuff = x.shuffle(Eigen::array<int, 3>({1, 2, 0}));
+    Eigen::Tensor3dXf x_shuff = demucscpp::permute3(x, {1, 2, 0});
 
     // Call the 2D transposed convolution function
     Eigen::Tensor3dXf y_out =
@@ -689,7 +690,7 @@ Eigen::Tensor3dXf conv1d_tr(const Eigen::Tensor3dXf &x,
 
     // Move end axis to the front
     Eigen::Tensor3dXf y_out_shuf =
-        y_out.shuffle(Eigen::array<int, 3>({2, 0, 1}));
+        demucscpp::permute3(y_out, {2, 0, 1});
 
     return y_out_shuf;
 }
@@ -705,7 +706,7 @@ Eigen::Tensor3dXf conv1d_tr_fused_gelu(const Eigen::Tensor3dXf &x,
         {(int)w.dimension(0), (int)w.dimension(1), (int)w.dimension(2), 1}});
 
     // Move 0 axis to the end
-    Eigen::Tensor3dXf x_shuff = x.shuffle(Eigen::array<int, 3>({1, 2, 0}));
+    Eigen::Tensor3dXf x_shuff = demucscpp::permute3(x, {1, 2, 0});
 
     // Call the 2D transposed convolution function
     Eigen::Tensor3dXf y_out =
@@ -714,7 +715,7 @@ Eigen::Tensor3dXf conv1d_tr_fused_gelu(const Eigen::Tensor3dXf &x,
 
     // Move end axis to the front
     Eigen::Tensor3dXf y_out_shuf =
-        y_out.shuffle(Eigen::array<int, 3>({2, 0, 1}));
+        demucscpp::permute3(y_out, {2, 0, 1});
 
     return y_out_shuf;
 }

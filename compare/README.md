@@ -16,8 +16,8 @@ library.
    Any audio format Android can decode works.
 2. Tick the engines to compare: the **original demucs.cpp** (upstream,
    unmodified), **builds 4–10** (the first released StemDeck engine),
-   **build 13**, and **build 13 + cores + GPU** (the app's engine: build 13
-   using every core and the GPU). See [`engines/`](../engines/README.md).
+   **build 13**, and **v4.1.0 + all optimizations** (the app's engine).
+   See [`engines/`](../engines/README.md).
 3. Pick the **reference** that the others are compared with (it always runs
    first; the original by default) and the number of **threads**. The
    original always uses 1 thread and holds the whole song in memory, so it

@@ -56,8 +56,9 @@ struct SeparateResult
     std::array<double, kNumSources> rms{};
 };
 
-// Loads the ggml weights once; safe to call again (no-op when the same path is
-// already loaded). Returns an empty string on success.
+// Loads the weights once; safe to call again (no-op when the same path is
+// already loaded). Takes the .safetensors file the Demucs project publishes
+// (v4.1.0 on) or demucs.cpp's ggml file. Returns an empty string on success.
 std::string load_model(const std::string &path);
 bool model_loaded();
 
