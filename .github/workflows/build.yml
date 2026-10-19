@@ -27,7 +27,7 @@ jobs:
           submodules: true
       - name: Build the engine for the CI host
         run: |
-          cmake -S app/src/main/cpp -B build/engine -DCMAKE_BUILD_TYPE=Release
+          cmake -S engine -B build/engine -DCMAKE_BUILD_TYPE=Release
           cmake --build build/engine -j"$(nproc)"
       - name: Cache the model
         uses: actions/cache@v4
@@ -45,11 +45,35 @@ jobs:
           if [ "$actual" != "$MODEL_SHA256" ]; then
             echo "::error::model checksum mismatch (got $actual)"; rm -f model/htdemucs-6s.bin; exit 1
           fi
+      - name: Keep a copy of the model in a release (for local profiling)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view model-cache --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create model-cache model/htdemucs-6s.bin --repo "${{ github.repository }}" \
+              --prerelease --title "Model cache (development only)" \
+              --notes "The htdemucs_6s ggml weights, for profiling the engine off-device. Not an app release."
       - name: Test the engine
         run: |
           pip install --quiet numpy pyloudnorm
           set -o pipefail
           python3 scripts/engine_test.py build/engine/sdengine_cli model/htdemucs-6s.bin build/engine-test 2>&1 | tee engine-test.log
+      - name: Benchmark one segment, baseline vs optimized (CI host)
+        run: |
+          set -o pipefail
+          {
+            echo "baseline:";  build/engine/sdbench_cli_baseline segment model/htdemucs-6s.bin seg-base.f32 2>/dev/null | tail -1
+            echo "optimized:"; build/engine/sdbench_cli segment model/htdemucs-6s.bin seg-opt.f32 2>/dev/null | tail -1
+            echo "compare:";   build/engine/sdbench_cli compare seg-base.f32 seg-opt.f32
+          } | tee bench-host.log
+          python3 - <<'PY'
+          import json
+          lines = open("bench-host.log").read().splitlines()
+          b = json.loads(lines[1]); o = json.loads(lines[3]); c = json.loads(lines[5])
+          print(f"baseline {b['ms']/1000:.1f} s, optimized {o['ms']/1000:.1f} s, speed-up {b['ms']/o['ms']:.2f}x")
+          print("SNR dB vs baseline:", c["snr_db"])
+          assert min(c["snr_db"]) > 40, "optimized engine output no longer matches the baseline"
+          PY
       - name: Publish logs to a ci-logs branch
         if: always()
         run: |
@@ -105,11 +129,15 @@ jobs:
           git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs ${{ github.run_id }} ${{ github.job }}"
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" logs:refs/heads/ci-logs/${{ github.job }}
       - name: Rename
-        run: cp app/build/outputs/apk/release/app-release.apk StemDeck-Android.apk
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk StemDeck-Android.apk
+          cp bench/build/outputs/apk/release/bench-release.apk StemDeck-Bench.apk
       - uses: actions/upload-artifact@v4
         with:
           name: StemDeck-Android
-          path: StemDeck-Android.apk
+          path: |
+            StemDeck-Android.apk
+            StemDeck-Bench.apk
 
   release:
     name: Publish the APK
@@ -125,8 +153,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="build-${{ github.run_number }}"
-          gh release create "$tag" StemDeck-Android.apk \
+          gh release create "$tag" StemDeck-Android.apk StemDeck-Bench.apk \
             --repo "${{ github.repository }}" \
             --title "StemDeck for Android, build ${{ github.run_number }}" \
-            --notes "Built from ${{ github.sha }}. Open this page on your phone and tap StemDeck-Android.apk to install." \
+            --notes "Built from ${{ github.sha }}. Open this page on your phone and tap StemDeck-Android.apk to install. StemDeck-Bench.apk is the separate benchmark app." \
             --latest

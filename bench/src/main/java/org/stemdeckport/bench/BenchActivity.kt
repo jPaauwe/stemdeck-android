@@ -1,0 +1,308 @@
+package org.stemdeckport.bench
+
+import android.app.Activity
+import android.app.ActivityManager
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import android.graphics.Color
+import android.graphics.Typeface
+import android.os.Build
+import android.os.Bundle
+import android.os.PowerManager
+import android.os.SystemClock
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.CheckBox
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Spinner
+import android.widget.TextView
+import android.widget.Toast
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.concurrent.thread
+import kotlin.math.roundToInt
+
+/**
+ * StemDeck Bench: measures the separation engine on this phone.
+ *
+ *  1. One 7.8 s segment on one thread, baseline vs optimized engine:
+ *     time, where it goes (per stage and per operation), and whether the
+ *     optimized output still matches the baseline.
+ *  2. A whole test song through the app's real separation path, at several
+ *     thread counts: time, real-time factor and peak memory.
+ */
+class BenchActivity : Activity() {
+    private lateinit var log: TextView
+    private lateinit var scroll: ScrollView
+    private lateinit var runBtn: Button
+    private lateinit var lengthSpin: Spinner
+    private lateinit var baselineFull: CheckBox
+    private val threadBoxes = mutableMapOf<Int, CheckBox>()
+    private val report = StringBuilder()
+    @Volatile private var running = false
+
+    private val songLengths = listOf(30, 60, 180)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val bg = Color.parseColor("#0b0b0d")
+        val fg = Color.parseColor("#eaeaec")
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(bg)
+            setPadding(32, 48, 32, 32)
+            fitsSystemWindows = true
+        }
+        fun label(t: String) = TextView(this).apply { text = t; setTextColor(fg); textSize = 14f }
+
+        root.addView(TextView(this).apply {
+            text = "StemDeck Bench"
+            setTextColor(Color.parseColor("#f5b417")); textSize = 22f; typeface = Typeface.DEFAULT_BOLD
+        })
+        root.addView(label("Times the separation engine on this phone. Keep the screen on and the phone at room temperature; a full run takes several minutes."))
+
+        val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        row1.addView(label("Test song length: "))
+        lengthSpin = Spinner(this).apply {
+            adapter = ArrayAdapter(this@BenchActivity, android.R.layout.simple_spinner_dropdown_item, songLengths.map { "$it s" })
+            setSelection(0)
+        }
+        row1.addView(lengthSpin)
+        root.addView(row1)
+
+        val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        row2.addView(label("Threads: "))
+        for (t in listOf(1, 2, 3, 4, 6)) {
+            val cb = CheckBox(this).apply { text = "$t"; setTextColor(fg); isChecked = t in setOf(1, 2, 4) }
+            threadBoxes[t] = cb
+            row2.addView(cb)
+        }
+        root.addView(row2)
+        baselineFull = CheckBox(this).apply {
+            text = "Also run the full song with the baseline engine (as the app does today)"
+            setTextColor(fg); isChecked = true
+        }
+        root.addView(baselineFull)
+
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        runBtn = Button(this).apply { text = "Run benchmark"; setOnClickListener { start() } }
+        buttons.addView(runBtn)
+        buttons.addView(Button(this).apply { text = "Copy"; setOnClickListener { copy() } })
+        buttons.addView(Button(this).apply { text = "Share"; setOnClickListener { share() } })
+        root.addView(buttons)
+
+        log = TextView(this).apply {
+            setTextColor(fg); textSize = 11f; typeface = Typeface.MONOSPACE; setTextIsSelectable(true)
+        }
+        scroll = ScrollView(this).apply { addView(log) }
+        root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        setContentView(root)
+
+        out(deviceInfo())
+    }
+
+    private fun out(line: String) {
+        report.append(line).append('\n')
+        runOnUiThread {
+            log.text = report
+            scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+        }
+    }
+
+    private fun copy() {
+        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("StemDeck Bench", report.toString()))
+        Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun share() {
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, report.toString())
+        }, "Share results"))
+    }
+
+    // ─── device ───
+    private fun deviceInfo(): String {
+        val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+        val mi = ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val cores = Runtime.getRuntime().availableProcessors()
+        val freqs = (0 until cores).map { c ->
+            readText("/sys/devices/system/cpu/cpu$c/cpufreq/cpuinfo_max_freq")?.trim()?.toLongOrNull()?.div(1000)
+        }
+        val soc = if (Build.VERSION.SDK_INT >= 31) "${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}" else Build.HARDWARE
+        return buildString {
+            append("StemDeck Bench ${BuildConfigInfo.version(this@BenchActivity)}\n")
+            append("${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())}\n")
+            append("Device: ${Build.MANUFACTURER} ${Build.MODEL}, SoC: $soc\n")
+            append("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ABI ${Build.SUPPORTED_ABIS.firstOrNull()}\n")
+            append("CPU: $cores cores, max MHz per core: ${freqs.joinToString(" ") { it?.toString() ?: "?" }}\n")
+            append("RAM: %.1f GB".format(mi.totalMem / 1e9))
+        }
+    }
+
+    private fun thermal(): String {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        return when (pm.currentThermalStatus) {
+            PowerManager.THERMAL_STATUS_NONE -> "none"
+            PowerManager.THERMAL_STATUS_LIGHT -> "light"
+            PowerManager.THERMAL_STATUS_MODERATE -> "MODERATE (throttling likely)"
+            PowerManager.THERMAL_STATUS_SEVERE -> "SEVERE (throttling)"
+            else -> "CRITICAL (throttling)"
+        }
+    }
+
+    private fun readText(path: String): String? = try { File(path).readText() } catch (_: Exception) { null }
+
+    // ─── memory sampling ───
+    private class PeakRss {
+        @Volatile var peakKb = 0L
+        @Volatile private var stop = false
+        private val t = thread(name = "rss") {
+            while (!stop) {
+                val kb = currentRssKb()
+                if (kb > peakKb) peakKb = kb
+                Thread.sleep(100)
+            }
+        }
+        fun finish(): Long { stop = true; t.join(); return peakKb }
+
+        companion object {
+            fun currentRssKb(): Long = try {
+                File("/proc/self/status").readLines().first { it.startsWith("VmRSS:") }
+                    .split(Regex("\\s+"))[1].toLong()
+            } catch (_: Exception) { 0L }
+        }
+    }
+
+    // ─── run ───
+    private fun start() {
+        if (running) return
+        val threads = threadBoxes.filterValues { it.isChecked }.keys.sorted()
+        val seconds = songLengths[lengthSpin.selectedItemPosition]
+        val withBaseline = baselineFull.isChecked
+        running = true
+        runBtn.isEnabled = false
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        report.clear()
+        out(deviceInfo())
+        thread(name = "bench") {
+            try {
+                run(threads, seconds, withBaseline)
+            } catch (e: Throwable) {
+                out("\nFAILED: ${e.javaClass.simpleName}: ${e.message}")
+            } finally {
+                running = false
+                runOnUiThread {
+                    runBtn.isEnabled = true
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+            }
+        }
+    }
+
+    private fun run(threads: List<Int>, songSeconds: Int, withBaseline: Boolean) {
+        out("Thermal at start: ${thermal()}")
+        val models = ModelManager(this)
+        if (!models.isReady()) out("\nDownloading the model (55 MB, first run only)…")
+        var lastPct = -1
+        val model = models.ensure { f ->
+            val pct = (f * 10).toInt() * 10
+            if (pct != lastPct) { lastPct = pct; out("  $pct%") }
+            true
+        }.absolutePath
+        val work = File(filesDir, "bench").apply { deleteRecursively(); mkdirs() }
+
+        // 1. One segment, one thread, baseline vs optimized.
+        out("\n1. One 7.8 s segment, 1 thread (2 rounds each, best kept)")
+        val results = mutableMapOf<String, JSONObject>()
+        for (round in 1..2) {
+            for (eng in listOf<EngineNative>(BaseNative, OptNative)) {
+                val t0 = SystemClock.elapsedRealtime()
+                val err = eng.load(model)
+                if (err.isNotEmpty()) throw IllegalStateException("${eng.label}: $err")
+                val loadMs = SystemClock.elapsedRealtime() - t0
+                val outFile = File(work, "seg-${eng.label}.f32").path
+                val js = JSONObject(eng.profile(outFile))
+                eng.free()
+                if (js.has("error")) throw IllegalStateException("${eng.label}: ${js.getString("error")}")
+                val ms = js.getDouble("ms")
+                out("  round $round ${eng.label.padEnd(9)} %6.2f s   (model load %.1f s, thermal %s)".format(ms / 1000, loadMs / 1000.0, thermal()))
+                val prev = results[eng.label]
+                if (prev == null || ms < prev.getDouble("ms")) results[eng.label] = js
+            }
+        }
+        val base = results.getValue("baseline").getDouble("ms")
+        val opt = results.getValue("optimized").getDouble("ms")
+        out("  best: baseline %.2f s, optimized %.2f s  →  %.2fx faster".format(base / 1000, opt / 1000, base / opt))
+        val cmp = JSONObject(OptNative.compare(File(work, "seg-baseline.f32").path, File(work, "seg-optimized.f32").path))
+        if (cmp.has("snr_db")) {
+            val snr = cmp.getJSONArray("snr_db")
+            val names = listOf("drums", "bass", "other", "vocals", "guitar", "piano")
+            out("  optimized vs baseline output, SNR dB (higher = closer; >60 is identical to the ear):")
+            out("   " + names.indices.joinToString("  ") { "${names[it]} %.0f".format(snr.getDouble(it)) })
+        } else out("  compare: $cmp")
+
+        val best = results.getValue("optimized")
+        out("\n  Where the time goes (optimized engine, per stage):")
+        table(best.getJSONArray("stages"), opt, nameIdx = 0, msIdx = 1, callsIdx = -1)
+        out("\n  Per operation (optimized engine):")
+        table(best.getJSONArray("ops"), opt, nameIdx = 0, msIdx = 2, callsIdx = 1)
+
+        // 2. Full song through the real separation path.
+        out("\n2. Full ${songSeconds} s test song, as the app separates it (24 s chunks)")
+        val song = File(work, "song.f32").path
+        if (!OptNative.writeSong(song, songSeconds.toDouble())) throw IllegalStateException("could not write the test song")
+        val runs = mutableListOf<Pair<EngineNative, Int>>()
+        if (withBaseline) runs += BaseNative to 2
+        threads.forEach { runs += OptNative to it }
+        for ((eng, t) in runs) {
+            val outDir = File(work, "full-${eng.label}-$t").apply { mkdirs() }
+            val rss = PeakRss()
+            val js = JSONObject(eng.separate(model, song, outDir.path, t, 24))
+            val peak = rss.finish()
+            outDir.deleteRecursively()
+            if (js.has("error")) { out("  ${eng.label} ${t}t: ${js.getString("error")}"); continue }
+            val s = js.getDouble("seconds")
+            out("  %-9s %d thread%s: %6.1f s  = %.2fx song length   peak memory %.2f GB   thermal %s".format(
+                eng.label, t, if (t == 1) " " else "s", s, s / songSeconds, peak / 1e6, thermal()))
+        }
+        out("\nDone. Tap Copy and paste the results to Claude.")
+    }
+
+    private fun table(rows: JSONArray, totalMs: Double, nameIdx: Int, msIdx: Int, callsIdx: Int) {
+        val items = (0 until rows.length()).map { rows.getJSONArray(it) }
+        // Merge stages with the same name (e.g. repeated progress messages).
+        val merged = LinkedHashMap<String, Pair<Double, Long>>()
+        for (r in items) {
+            val n = r.getString(nameIdx)
+            val ms = r.getDouble(msIdx)
+            val calls = if (callsIdx >= 0) r.getLong(callsIdx) else 1L
+            val p = merged[n]
+            merged[n] = if (p == null) ms to calls else (p.first + ms) to (p.second + calls)
+        }
+        var sum = 0.0
+        for ((n, p) in merged.entries.sortedByDescending { it.value.first }) {
+            sum += p.first
+            val calls = if (callsIdx >= 0) "  %5d×".format(p.second) else ""
+            out("   %5.1f%%  %8.0f ms%s  %s".format(100 * p.first / totalMs, p.first, calls, n.take(48)))
+        }
+        if (callsIdx >= 0) out("   %5.1f%%  %8.0f ms          (not in the list above)".format(100 * (totalMs - sum) / totalMs, totalMs - sum))
+    }
+}
+
+private object BuildConfigInfo {
+    fun version(a: Activity): String = try {
+        val pi = a.packageManager.getPackageInfo(a.packageName, 0)
+        "${pi.versionName} (build ${if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else 0})"
+    } catch (_: Exception) { "?" }
+}
