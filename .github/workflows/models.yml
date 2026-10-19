@@ -1,0 +1,57 @@
+name: Models
+
+# Exports the analysis models the app downloads (scripts/export_models.py),
+# checks each against PyTorch and against the SHA-256 in models/models.json,
+# and publishes them as assets of the models-N pre-release named there, once.
+# A published asset is never replaced: the app pins its checksum.
+on:
+  push:
+    branches: [main, 'phase*']
+    paths: ['models/**', 'scripts/export_models.py', '.github/workflows/models.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Pinned toolchain (the export is reproducible byte for byte with these)
+        run: |
+          pip install --quiet torch==2.6.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          pip install --quiet beat-this==1.1.0 einops==0.8.2 rotary-embedding-torch==0.6.5 soxr==1.0.0 \
+            numpy==2.4.4 onnx==1.23.2 protobuf==7.36.0 ml_dtypes==0.6.0 onnxruntime==1.29.0
+      - name: Checkpoints
+        run: |
+          mkdir -p ckpt
+          curl -fsSL --retry 3 -o ckpt/final0.ckpt https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/final0.ckpt
+          echo "8c328b45f59d8dd3dff219253ff6a8d6482be57d0133a29140e2febbf8eb8331  ckpt/final0.ckpt" | sha256sum -c
+      - name: Export and check
+        run: python3 scripts/export_models.py --out out --beat-this-ckpt ckpt/final0.ckpt --check-manifest
+      - name: Publish what is not published yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY' > publish.txt
+          import json
+          m = json.load(open("models/models.json"))
+          for name, e in m.items():
+              print(e["release"], name)
+          PY
+          while read -r rel name; do
+            if ! gh release view "$rel" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              gh release create "$rel" --repo "${{ github.repository }}" --prerelease \
+                --title "Analysis models ($rel)" \
+                --notes "Model files StemDeck for Android downloads on first use. Not an app release. Each file is listed with its source, licence and SHA-256 in models/models.json; the app checks the SHA-256 before using a file. Beat This! (CPJKU): MIT."
+            fi
+            if gh release view "$rel" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' | grep -qx "$name"; then
+              echo "$rel/$name already published"
+            else
+              gh release upload "$rel" "out/$name" --repo "${{ github.repository }}"
+            fi
+          done < publish.txt

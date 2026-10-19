@@ -32,6 +32,17 @@ class Job(
     var format: String = "wav"
     /** What it was separated on, e.g. "10 cores, GPU: …". */
     var computeDevice: String = "phone"
+    // Android 1.1: analysis after separation (beat grid, key), as desktop's
+    // fields. All null for songs separated before it existed.
+    var bpm: Int? = null
+    var key: String? = null
+    var scale: String? = null
+    var keyConfidence: Int? = null
+    var tempoStability: Int? = null
+    /** Why an analysis stage produced nothing, by stage ("beats", "key"). Android only. */
+    var analysisNotes: Map<String, String> = emptyMap()
+    /** Seconds per stage, as desktop records them (#293). */
+    var stageTimings: Map<String, Double> = emptyMap()
 
     /** Bumped on every change; the SSE stream sends a frame when it moves. */
     @Volatile var version: Long = 0
@@ -48,13 +59,14 @@ class Job(
         put("title", title)
         put("duration", duration ?: JSONObject.NULL)
         put("thumbnail", JSONObject.NULL)
-        put("bpm", JSONObject.NULL)
-        put("key", JSONObject.NULL)
-        put("scale", JSONObject.NULL)
+        put("bpm", bpm ?: JSONObject.NULL)
+        put("key", key ?: JSONObject.NULL)
+        put("scale", scale ?: JSONObject.NULL)
+        put("key_confidence", keyConfidence ?: JSONObject.NULL)
         put("lufs", lufs ?: JSONObject.NULL)
         put("peak_db", peakDb ?: JSONObject.NULL)
         put("dynamic_range", dynamicRange ?: JSONObject.NULL)
-        put("tempo_stability", JSONObject.NULL)
+        put("tempo_stability", tempoStability ?: JSONObject.NULL)
         put("stem_presence", stemPresence?.let { JSONObject(it as Map<*, *>) } ?: JSONObject.NULL)
         put("stems", JSONArray().apply {
             for (s in stems) put(JSONObject().put("name", s).put("url", stemUrl(s)))
@@ -70,6 +82,8 @@ class Job(
         put("favorite", favorite)
         put("created_at", createdAt)
         put("stem_format", format)
+        put("analysis_notes", JSONObject(analysisNotes as Map<*, *>))
+        put("stage_timings", JSONObject(stageTimings as Map<*, *>))
     }
 
     fun toRecord(): JSONObject = toState().apply {
@@ -105,6 +119,19 @@ class Job(
             job.computeSeconds = optD("compute_seconds")
             job.format = o.optString("stem_format", "wav").takeIf { it == "mp3" } ?: "wav"
             job.computeDevice = o.optString("compute_device", "phone")
+            fun optI(k: String): Int? = if (o.isNull(k) || !o.has(k)) null else o.optInt(k)
+            fun optS(k: String): String? = if (o.isNull(k) || !o.has(k)) null else o.optString(k)
+            job.bpm = optI("bpm")
+            job.key = optS("key")
+            job.scale = optS("scale")
+            job.keyConfidence = optI("key_confidence")
+            job.tempoStability = optI("tempo_stability")
+            job.analysisNotes = o.optJSONObject("analysis_notes")?.let { n ->
+                n.keys().asSequence().associateWith { n.getString(it) }
+            } ?: emptyMap()
+            job.stageTimings = o.optJSONObject("stage_timings")?.let { n ->
+                n.keys().asSequence().associateWith { n.getDouble(it) }
+            } ?: emptyMap()
             return job
         }
     }

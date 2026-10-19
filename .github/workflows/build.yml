@@ -161,6 +161,83 @@ jobs:
           git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs ${{ github.run_id }} ${{ github.job }}"
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" logs:refs/heads/ci-logs/${{ github.job }}
 
+  analysis:
+    name: Analysis stages against desktop StemDeck
+    runs-on: ubuntu-24.04
+    env:
+      ORT_VERSION: 1.31.0
+      ORT_SHA256: cc5c72baf5ae5c8238a6841f0897227be2d02826b9cf98eaf02fdefaeeb03a57
+      BEAT_THIS_CKPT_SHA256: 8c328b45f59d8dd3dff219253ff6a8d6482be57d0133a29140e2febbf8eb8331
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: scripts/parity-requirements.txt
+      - name: Desktop StemDeck's Python at the ported commit (the reference)
+        run: |
+          git clone -q https://github.com/stemdeckapp/stemdeck upstream
+          git -C upstream checkout -q "$(cut -d' ' -f1 app/src/main/assets/web/UPSTREAM_COMMIT)"
+          pip install --quiet --extra-index-url https://download.pytorch.org/whl/cpu -r scripts/parity-requirements.txt
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
+      - name: ONNX Runtime for the host (same version as the app's)
+        run: |
+          curl -fsSL --retry 3 -o ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz"
+          echo "$ORT_SHA256  ort.tgz" | sha256sum -c
+          tar -xzf ort.tgz
+      - name: Build the analysis stages for the host
+        run: |
+          cmake -S analysis -B build/analysis -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/analysis -j"$(nproc)"
+      - name: The beat model, exported from its checkpoint (must match models/models.json)
+        run: |
+          mkdir -p ckpt
+          curl -fsSL --retry 3 -o ckpt/final0.ckpt https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/final0.ckpt
+          echo "$BEAT_THIS_CKPT_SHA256  ckpt/final0.ckpt" | sha256sum -c
+          python3 scripts/export_models.py --out models-out --beat-this-ckpt ckpt/final0.ckpt --check-manifest 2>&1 | grep -v -i warning | tee export.log
+      - name: Test audio (CC-licensed examples from librosa's data repository)
+        run: |
+          mkdir -p audio && cd audio
+          for f in "Kevin_MacLeod_-_Vibe_Ace" "admiralbob77_-_Choice_-_Drum-bass" \
+                   "Kevin_MacLeod_-_P_I_Tchaikovsky_Dance_of_the_Sugar_Plum_Fairy" \
+                   "Hungarian_Dance_number_5_-_Allegro_in_F_sharp_minor_(string_orchestra)" \
+                   "Karissa_Hobbs_-_Lets_Go_Fishin" "147793__setuniman__sweet-waltz-0i-22mi" \
+                   "442789__lena-orsa__happy-music-pistachio-ice-cream-ragtime" "snare-accelerate" \
+                   "drese-midi" "drese-tempo"; do
+            q=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$f.hq.ogg")
+            curl -fsSL --retry 3 -o "$f.hq.ogg" "https://librosa.org/data/audio/$q"
+          done
+      - name: Beat grid, key and click render against desktop
+        run: |
+          set -o pipefail
+          python3 scripts/analysis_parity.py --stages beatgrid,key,click \
+            --cli build/analysis/sdanalysis_cli --upstream upstream \
+            --beat-ckpt ckpt/final0.ckpt --beat-onnx models-out/beat_this_final0.onnx \
+            --ort-lib "onnxruntime-linux-x64-$ORT_VERSION/lib/libonnxruntime.so" \
+            --audio audio/*.ogg 2>&1 | grep -v -i -E "warning|autocast" | tee analysis-parity.log
+      - name: Click scheduler (JS) against the shared fixture
+        run: node scripts/js/click_parity.test.mjs | tee click-js.log
+      - name: Mobile UI (Playwright, 384 x 640/740/832)
+        run: |
+          set -o pipefail
+          pip install --quiet playwright==1.56.0
+          python3 -m playwright install --with-deps chromium >/dev/null
+          python3 scripts/ui_test.py --shots ui-shots 2>&1 | tee ui-test.log
+      - name: Publish logs to a ci-logs branch
+        if: always()
+        run: |
+          mkdir -p /tmp/ci-logs
+          cp -f *.log /tmp/ci-logs/ 2>/dev/null || true
+          cp -rf ui-shots /tmp/ci-logs/ 2>/dev/null || true
+          cd /tmp/ci-logs
+          echo "run ${{ github.run_id }} job ${{ github.job }} sha ${{ github.sha }}" > INFO.txt
+          git init -q -b logs && git add -A
+          git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs ${{ github.run_id }} ${{ github.job }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" logs:refs/heads/ci-logs/${{ github.job }}
+
   apk:
     name: APK
     runs-on: ubuntu-latest
@@ -205,7 +282,11 @@ jobs:
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           set -o pipefail
-          ./gradlew --no-daemon assembleRelease 2>&1 | tee gradle.log
+          ./gradlew --no-daemon :app:testReleaseUnitTest assembleRelease 2>&1 | tee gradle.log
+      - name: Native libraries are 16 KB aligned; APK size
+        run: |
+          set -o pipefail
+          python3 scripts/check_apk.py app/build/outputs/apk/release/app-release.apk | tee apk-check.log
       - name: Publish logs to a ci-logs branch
         if: always()
         run: |
@@ -231,7 +312,7 @@ jobs:
 
   release:
     name: Publish the APK
-    needs: [engine, apk]
+    needs: [engine, analysis, apk]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:

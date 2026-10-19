@@ -17,16 +17,39 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_GPU, true)
         set(v) { prefs.edit().putBoolean(KEY_GPU, v).apply() }
 
-    fun toJson(): JSONObject = JSONObject().put("stem_format", stemFormat).put("gpu", gpu)
+    /**
+     * The click track's settings in the Mixer (on/off, volume, accent, count-in),
+     * as desktop keeps them ("stemdeck:metronome"). Kept here rather than in
+     * the page's localStorage, whose origin (the server's port) changes on
+     * every launch.
+     */
+    var click: JSONObject
+        get() = try {
+            JSONObject(prefs.getString(KEY_CLICK, null) ?: "{}")
+        } catch (e: Exception) {
+            JSONObject()
+        }
+        set(v) {
+            val clean = JSONObject()
+            if (v.has("on")) clean.put("on", v.optBoolean("on", false))
+            if (v.has("volume")) clean.put("volume", v.optDouble("volume", 0.6).coerceIn(0.0, 1.0))
+            if (v.has("accent")) clean.put("accent", v.optInt("accent", -1).coerceIn(-1, 32))
+            if (v.has("count_in")) clean.put("count_in", v.optInt("count_in", 0).coerceIn(0, 4))
+            prefs.edit().putString(KEY_CLICK, clean.toString()).apply()
+        }
+
+    fun toJson(): JSONObject = JSONObject().put("stem_format", stemFormat).put("gpu", gpu).put("click", click)
 
     fun apply(o: JSONObject) {
         o.optString("stem_format").takeIf { it.isNotEmpty() }?.let { stemFormat = it }
         if (o.has("gpu")) gpu = o.optBoolean("gpu", true)
+        o.optJSONObject("click")?.let { click = it }
     }
 
     companion object {
         private const val KEY_FORMAT = "stem_format"
         private const val KEY_GPU = "gpu"
+        private const val KEY_CLICK = "click"
         val FORMATS = setOf("mp3", "wav")
     }
 }

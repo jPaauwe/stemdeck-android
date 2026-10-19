@@ -28,7 +28,9 @@ import androidx.core.view.WindowInsetsCompat
 import org.stemdeckport.android.App
 import org.stemdeckport.android.BuildConfig
 import org.stemdeckport.android.Diagnostics
+import org.stemdeckport.android.data.Job
 import org.stemdeckport.android.data.MixExport
+import org.stemdeckport.android.data.StemsZip
 import org.stemdeckport.android.engine.NativeEngine
 import org.stemdeckport.android.server.LocalServer
 import org.stemdeckport.android.work.SeparationService
@@ -219,33 +221,56 @@ class MainActivity : ComponentActivity() {
         uri.lastPathSegment
     }
 
-    // ─── "Export mix" → Downloads/StemDeck ───
+    // ─── "Export mix" and "Export stems" → Downloads/StemDeck ───
     private fun onDownload(url: Uri) {
         val seg = url.pathSegments
-        // /api/jobs/<id>/mixdown.wav
-        if (seg.size != 4 || seg[0] != "api" || seg[1] != "jobs" || seg[3] != "mixdown.wav") return
+        // /api/jobs/<id>/mixdown.wav or /api/jobs/<id>/stems/all.zip
+        if (seg.size < 4 || seg[0] != "api" || seg[1] != "jobs") return
         val job = app.store.get(seg[2]) ?: return
+        if (seg.size == 5 && seg[3] == "stems" && seg[4] == "all.zip") {
+            exportZip(job, url)
+            return
+        }
+        if (seg.size != 4 || seg[3] != "mixdown.wav") return
         val names = url.getQueryParameter("stems")?.split(',')?.filter { it in job.stems } ?: job.stems
         val gains = url.getQueryParameter("gains")?.split(',')?.map { it.toFloatOrNull() ?: 1f }
         if (names.isEmpty()) return
         val g = names.indices.map { gains?.getOrNull(it)?.coerceIn(0f, 2f) ?: 1f }
+        val click = MixExport.clickFrom(app.store, job) { url.getQueryParameter(it) }
         val format = app.settings.stemFormat
         val fileName = "${LocalServer.safeFileName(job.title)} (mix).$format"
-        Toast.makeText(this, "Exporting the mix…", Toast.LENGTH_SHORT).show()
+        saveToDownloads(fileName, MixExport.mimeType(format), "Exporting the mix…") { out ->
+            MixExport.write(app.store, job, names, g, format, cacheDir, out, click)
+        }
+    }
+
+    // Android 1.1: every stem (or the ones the Mixer has active) in one ZIP.
+    private fun exportZip(job: Job, url: Uri) {
+        val names = StemsZip.resolve(job, url.getQueryParameter("stems")).getOrElse {
+            Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
+            return
+        }
+        val files = names.map { it to app.store.stemFile(job.id, it) }.filter { it.second.isFile }
+        if (files.isEmpty()) return
+        saveToDownloads(StemsZip.fileName(job), "application/zip", "Exporting the stems…") { out ->
+            StemsZip.write(files, StemsZip.titleSlug(job.title), out)
+        }
+    }
+
+    private fun saveToDownloads(fileName: String, mime: String, starting: String, write: (java.io.OutputStream) -> Unit) {
+        Toast.makeText(this, starting, Toast.LENGTH_SHORT).show()
         thread(name = "export") {
             try {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, MixExport.mimeType(format))
+                    put(MediaStore.MediaColumns.MIME_TYPE, mime)
                     put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/StemDeck")
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
                 val target = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                     ?: throw IllegalStateException("Could not create the file in Downloads.")
                 try {
-                    contentResolver.openOutputStream(target)!!.buffered(1 shl 16).use {
-                        MixExport.write(app.store, job, names, g, format, cacheDir, it)
-                    }
+                    contentResolver.openOutputStream(target)!!.buffered(1 shl 16).use { write(it) }
                     contentResolver.update(target, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
                 } catch (e: Exception) {
                     contentResolver.delete(target, null, null)

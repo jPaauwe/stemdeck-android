@@ -78,6 +78,9 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
     packaging {
         jniLibs { useLegacyPackaging = false }
     }
@@ -89,4 +92,11 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+    // The analysis models (beat grid, and from 1.2 sections and the vocal
+    // split) run on ONNX Runtime. Only its native library is used, from C++
+    // (analysis/src/ort.cpp); the C API header there is from the same version.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

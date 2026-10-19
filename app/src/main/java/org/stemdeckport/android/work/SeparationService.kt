@@ -20,7 +20,9 @@ import org.stemdeckport.android.App
 import org.stemdeckport.android.R
 import org.stemdeckport.android.data.Job
 import org.stemdeckport.android.engine.AudioDecoder
+import org.stemdeckport.android.engine.Models
 import org.stemdeckport.android.engine.Mp3Codec
+import org.stemdeckport.android.engine.NativeAnalysis
 import org.stemdeckport.android.engine.NativeEngine
 import org.stemdeckport.android.ui.MainActivity
 import java.io.File
@@ -151,11 +153,11 @@ class SeparationService : Service() {
 
         try {
             // 1. The model, downloaded on first use.
-            if (!app.models.isReady()) {
-                set("downloading", "Downloading the separation model (first time only)", 0.0, persist = true)
+            if (!app.models.isReady(Models.DEMUCS)) {
+                set("downloading", "Downloading the separation model (first time only, 55 MB)", 0.0, persist = true)
             }
-            val modelFile = app.models.ensure { f ->
-                set("downloading", "Downloading the separation model (first time only)", 0.04 * f)
+            val modelFile = app.models.ensure(Models.DEMUCS) { f ->
+                set("downloading", "Downloading the separation model (first time only, 55 MB)", 0.04 * f)
                 !stopped()
             }
             set("analyzing", "Loading the model", 0.04, persist = true)
@@ -183,11 +185,13 @@ class SeparationService : Service() {
                 } else null
             }
 
-            // 4. Separation.
+            // 4. Separation. Every source is written, the ones the user did not
+            // pick only until the analysis below has used them (the beat grid
+            // needs the drums, the key the harmony and the bass).
             val selected = job.selectedStems.filter { it in NativeEngine.SOURCES }.ifEmpty { NativeEngine.SOURCES }
             val stemsDir = store.stemsDir(id).apply { mkdirs() }
             val mp3 = job.format == "mp3"
-            val sepEnd = if (mp3) 0.93 else 0.99
+            val sepEnd = 0.80
             // Every core, plus the GPU when it is on and passes its self-test.
             val useGpu = app.settings.gpu
             val compute = NativeEngine.computeInfo(useGpu)
@@ -197,22 +201,42 @@ class SeparationService : Service() {
             val sepStage = "Separating stems ($cores${if (onGpu) " + GPU" else ""})"
             store.update(id) { it.computeDevice = compute }
             set("separating", sepStage, 0.10, persist = true)
+            var mark = SystemClock.elapsedRealtime()
+            val timings = LinkedHashMap<String, Double>()
+            fun lap(name: String) {
+                val now = SystemClock.elapsedRealtime()
+                timings[name] = Math.round((now - mark) / 100.0) / 10.0
+                mark = now
+            }
             val rms = NativeEngine.separate(
-                prepared.path, stemsDir.path, selected.toSet(), app.separationThreads(), CHUNK_SECONDS, useGpu,
+                prepared.path, stemsDir.path, NativeEngine.SOURCES.toSet(), app.separationThreads(), CHUNK_SECONDS, useGpu,
             ) { f, _ ->
                 set("separating", sepStage, 0.10 + (sepEnd - 0.10) * f); !stopped()
             }
+            lap("separate")
             val written = NativeEngine.SOURCES.filter { it in selected }
 
-            // 5. MP3 stems (320 kbps), unless the user chose WAV.
+            // 5. Analysis, each stage best-effort: a failure leaves that
+            // feature unavailable (and says why) but never fails the song.
+            val notes = LinkedHashMap<String, String>()
+            analyzeBeats(id, stemsDir, notes, ::set, stopped, 0.80, 0.90)
+            lap("beatgrid")
+            analyzeKey(id, stemsDir, notes, ::set, 0.90)
+            lap("key")
+            store.update(id) { it.analysisNotes = notes }
+            for (s in NativeEngine.SOURCES) if (s !in written) File(stemsDir, "$s.wav").delete()
+
+            // 6. MP3 stems (320 kbps), unless the user chose WAV.
+            val mp3Start = 0.93
             if (mp3) {
-                set("separating", "Saving MP3 stems", sepEnd, persist = true)
+                set("separating", "Saving MP3 stems", mp3Start, persist = true)
                 encodeMp3(written.map { File(stemsDir, "$it.wav") }) { f ->
-                    set("separating", "Saving MP3 stems", sepEnd + (0.99 - sepEnd) * f); !stopped()
+                    set("separating", "Saving MP3 stems", mp3Start + (0.99 - mp3Start) * f); !stopped()
                 }
+                lap("mp3")
             }
 
-            // 6. Done. Presence = each stem's RMS as a share of the loudest,
+            // 7. Done. Presence = each stem's RMS as a share of the loudest,
             // as desktop computes it.
             val loudest = written.maxOf { rms[NativeEngine.SOURCES.indexOf(it)] }.takeIf { it > 0 } ?: 1.0
             val presence = written.associateWith { (rms[NativeEngine.SOURCES.indexOf(it)] / loudest * 100).roundToInt() }
@@ -223,9 +247,10 @@ class SeparationService : Service() {
                 it.stems = written
                 it.stemPresence = presence
                 it.computeSeconds = (SystemClock.elapsedRealtime() - t0) / 1000.0
+                it.stageTimings = timings
             }
             work.deleteRecursively()
-            Log.i(TAG, "job $id done in ${(SystemClock.elapsedRealtime() - t0) / 1000}s")
+            Log.i(TAG, "job $id done in ${(SystemClock.elapsedRealtime() - t0) / 1000}s: $timings")
         } catch (e: CancellationException) {
             val terminal = store.stopRequested(id) ?: "cancelled"
             store.update(id) {
@@ -251,6 +276,81 @@ class SeparationService : Service() {
             store.clearStop(id)
             raw.delete()
             prepared.delete()
+        }
+    }
+
+    /**
+     * The click track's beat grid, from the drums stem (desktop's
+     * compute_beat_grid). Downloads the beat model on first use. Writes
+     * stems/beats.json and the job's BPM and tempo stability.
+     */
+    private fun analyzeBeats(
+        id: String, stemsDir: File, notes: MutableMap<String, String>,
+        set: (String, String, Double, Boolean) -> Unit, stopped: () -> Boolean, from: Double, to: Double,
+    ) {
+        val store = app.store
+        try {
+            val dlStage = "Downloading the beat model (first time only, 82 MB)"
+            if (!app.models.isReady(Models.BEAT_THIS)) set("analyzing", dlStage, from, true)
+            val model = app.models.ensure(Models.BEAT_THIS) { f ->
+                set("analyzing", dlStage, from + 0.3 * (to - from) * f, false); !stopped()
+            }
+            val start = from + 0.3 * (to - from)
+            set("analyzing", "Finding the beat", start, true)
+            val why = StringBuilder()
+            val grid = NativeAnalysis.beatGrid(
+                File(stemsDir, "drums.wav"), "drums", model, 0,
+                { f, _ -> set("analyzing", "Finding the beat", start + (to - start) * f, false); !stopped() }, why,
+            )
+            if (grid == null) {
+                notes["beats"] = "No beat grid: $why."
+                return
+            }
+            val tmp = File(stemsDir, "beats.json.tmp")
+            tmp.writeText(grid.json.toString())
+            if (!tmp.renameTo(File(stemsDir, "beats.json"))) throw IllegalStateException("could not save beats.json")
+            store.update(id) {
+                it.bpm = grid.bpm.takeIf { b -> b > 0 }?.roundToInt()
+                it.tempoStability = grid.tempoStability
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "beat grid failed for $id", e)
+            notes["beats"] = "No beat grid: " + when (e) {
+                is java.io.IOException -> "the beat model could not be downloaded (${e.message})."
+                is OutOfMemoryError -> "the phone ran out of memory."
+                else -> (e.message ?: e.javaClass.simpleName) + "."
+            }
+        }
+    }
+
+    /**
+     * The key from the separated harmony stems and the bass, as desktop's
+     * refine_key_from_stems does it (vocals count for half).
+     */
+    private fun analyzeKey(
+        id: String, stemsDir: File, notes: MutableMap<String, String>,
+        set: (String, String, Double, Boolean) -> Unit, at: Double,
+    ) {
+        try {
+            set("analyzing", "Finding the key", at, true)
+            fun stem(n: String) = File(stemsDir, "$n.wav").takeIf { it.isFile }
+            val harmony = listOf("guitar" to 1.0, "piano" to 1.0, "other" to 1.0, "vocals" to 0.5)
+                .mapNotNull { (n, w) -> stem(n)?.let { it to w } }
+            val k = NativeAnalysis.key(harmony, stem("bass"))
+            if (k == null) {
+                notes["key"] = "No key: the harmony stems are silent."
+                return
+            }
+            app.store.update(id) {
+                it.key = k.key
+                it.scale = k.scale
+                it.keyConfidence = k.confidence
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "key detection failed for $id", e)
+            notes["key"] = "No key: " + (e.message ?: e.javaClass.simpleName) + "."
         }
     }
 

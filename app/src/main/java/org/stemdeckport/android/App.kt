@@ -4,7 +4,7 @@ import android.app.ActivityManager
 import android.app.Application
 import org.stemdeckport.android.data.JobStore
 import org.stemdeckport.android.data.Settings
-import org.stemdeckport.android.engine.ModelManager
+import org.stemdeckport.android.engine.ModelStore
 import org.stemdeckport.android.engine.NativeEngine
 import org.stemdeckport.android.server.LocalServer
 import org.stemdeckport.android.work.SeparationService
@@ -13,7 +13,7 @@ import java.io.File
 class App : Application() {
     lateinit var store: JobStore
         private set
-    lateinit var models: ModelManager
+    lateinit var models: ModelStore
         private set
     lateinit var settings: Settings
         private set
@@ -32,7 +32,7 @@ class App : Application() {
         // with the app.
         val base = getExternalFilesDir(null) ?: filesDir
         store = JobStore(File(base, "jobs"))
-        models = ModelManager(this)
+        models = ModelStore(File(filesDir, "models"))
         settings = Settings(this)
         store.onStopRequested = { NativeEngine.cancel() }
     }

@@ -10,6 +10,7 @@ import org.stemdeckport.android.data.Job
 import org.stemdeckport.android.data.JobStore
 import org.stemdeckport.android.data.MixExport
 import org.stemdeckport.android.data.Settings
+import org.stemdeckport.android.data.StemsZip
 import org.stemdeckport.android.engine.NativeEngine
 import java.io.File
 import java.io.FileInputStream
@@ -97,7 +98,14 @@ class LocalServer(
     private fun api(s: IHTTPSession): Response {
         val parts = s.uri.removePrefix("/api/").trimEnd('/').split('/')
         val method = s.method
-        if (parts[0] == "config") return json(200, JSONObject().put("platform", "android"))
+        if (parts[0] == "config") {
+            // Android: which models still have to be downloaded, so the Extract
+            // screen can say so before the first song.
+            val models = org.stemdeckport.android.App.instance.models
+            return json(200, JSONObject().put("platform", "android").put("models", JSONObject()
+                .put("separation", models.isReady(org.stemdeckport.android.engine.Models.DEMUCS))
+                .put("beat", models.isReady(org.stemdeckport.android.engine.Models.BEAT_THIS))))
+        }
         // Android: app settings (the stem file format).
         if (parts[0] == "settings") {
             if (method == Method.PUT || method == Method.POST) {
@@ -143,6 +151,9 @@ class LocalServer(
             parts.size == 3 && parts[2] == "vocal-split" ->
                 json(501, detail("The lead/backing vocal split is not available on Android yet."))
             parts.size == 3 && parts[2] == "mixdown.wav" -> mixdown(s, job)
+            // Android 1.1: the click track's beat grid, and every stem in one ZIP.
+            parts.size == 4 && parts[2] == "stems" && parts[3] == "beats.json" -> beatGrid(job)
+            parts.size == 4 && parts[2] == "stems" && parts[3] == "all.zip" -> stemsZip(s, job)
             parts.size == 4 && parts[2] == "stems" && (parts[3].endsWith(".wav") || parts[3].endsWith(".mp3")) ->
                 stem(s, job, parts[3].substringBeforeLast('.'))
             else -> json(404, detail("not found"))
@@ -191,12 +202,51 @@ class LocalServer(
         return fileWithRange(s, f, MixExport.mimeType(f.extension))
     }
 
+    /** desktop's GET /jobs/{id}/stems/beats.json: 404 when the song has no grid. */
+    private fun beatGrid(job: Job): Response {
+        if (job.status != "done") return json(404, detail("job not ready"))
+        val f = File(store.stemsDir(job.id), "beats.json")
+        if (!f.isFile) return json(404, detail("beat grid not found"))
+        return newFixedLengthResponse(status(200, "OK"), "application/json", FileInputStream(f), f.length()).apply {
+            addHeader("Cache-Control", "no-cache")
+        }
+    }
+
+    /** desktop's GET /jobs/{id}/stems/all.zip?stems=a,b, streamed as it is made. */
+    private fun stemsZip(s: IHTTPSession, job: Job): Response {
+        if (job.status != "done") return json(404, detail("job not ready"))
+        val fmt = s.parameters["format"]?.firstOrNull()
+        if (fmt != null && fmt != job.format) {
+            return json(422, detail("this song's stems are stored as ${job.format.uppercase()}"))
+        }
+        val names = StemsZip.resolve(job, s.parameters["stems"]?.firstOrNull())
+            .getOrElse { return json(422, detail(it.message ?: "bad request")) }
+        val files = names.map { it to store.stemFile(job.id, it) }.filter { it.second.isFile }
+        if (files.isEmpty()) return json(404, detail("no stems found"))
+        val pipeIn = object : PipedInputStream(1 shl 16) {
+            @Volatile var closed = false
+            override fun close() { closed = true; super.close() }
+        }
+        val pipeOut = PipedOutputStream(pipeIn)
+        thread(name = "zip") {
+            try {
+                pipeOut.use { StemsZip.write(files, StemsZip.titleSlug(job.title), it) { !pipeIn.closed } }
+            } catch (e: Exception) {
+                Log.w(TAG, "zip stopped", e)
+            }
+        }
+        return newChunkedResponse(status(200, "OK"), "application/zip", pipeIn).apply {
+            addHeader("Content-Disposition", "attachment; filename=\"${StemsZip.fileName(job)}\"")
+        }
+    }
+
     private fun mixdown(s: IHTTPSession, job: Job): Response {
         val names = s.parameters["stems"]?.firstOrNull()?.split(',')?.filter { it in job.stems } ?: job.stems
         val gains = s.parameters["gains"]?.firstOrNull()?.split(',')?.map { it.toFloatOrNull() ?: 1f }
         if (names.isEmpty()) return json(400, detail("nothing to mix"))
         val g = names.indices.map { gains?.getOrNull(it)?.coerceIn(0f, 2f) ?: 1f }
         val format = settings.stemFormat
+        val click = MixExport.clickFrom(store, job) { k -> s.parameters[k]?.firstOrNull() }
         // Streamed as it is made. The work stops when the reader goes away
         // (the WebView hands downloads to the app and drops this request).
         val pipeIn = object : PipedInputStream(1 shl 16) {
@@ -206,7 +256,7 @@ class LocalServer(
         val pipeOut = PipedOutputStream(pipeIn)
         thread(name = "mixdown") {
             try {
-                pipeOut.use { MixExport.write(store, job, names, g, format, context.cacheDir, it) { !pipeIn.closed } }
+                pipeOut.use { MixExport.write(store, job, names, g, format, context.cacheDir, it, click) { !pipeIn.closed } }
             } catch (e: Exception) {
                 Log.w(TAG, "mixdown stopped", e)
             }
@@ -280,7 +330,7 @@ class LocalServer(
 
         private fun reason(code: Int) = when (code) {
             200 -> "OK"; 400 -> "Bad Request"; 403 -> "Forbidden"; 404 -> "Not Found"
-            405 -> "Method Not Allowed"; 500 -> "Internal Server Error"; 501 -> "Not Implemented"
+            405 -> "Method Not Allowed"; 422 -> "Unprocessable Entity"; 500 -> "Internal Server Error"; 501 -> "Not Implemented"
             else -> "Status"
         }
 

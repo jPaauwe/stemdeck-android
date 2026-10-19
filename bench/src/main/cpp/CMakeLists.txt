@@ -26,3 +26,10 @@ endfunction()
 sd_bench_lib(sdbench_opt sdengine_opt_prof "org/stemdeckport/bench/OptNative")
 sd_bench_lib(sdbench_base sdengine_base "org/stemdeckport/bench/BaseNative")
 sd_bench_lib(sdbench_orig sdengine_orig "org/stemdeckport/bench/OrigNative")
+
+# The analysis stages (beat grid, key) the app runs after separation.
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../analysis" analysis EXCLUDE_FROM_ALL)
+add_library(sdbench_analysis SHARED analysis_bench_jni.cpp)
+target_compile_options(sdbench_analysis PRIVATE -O3 -fexceptions -frtti -fvisibility=hidden)
+target_link_libraries(sdbench_analysis sdanalysis ${log-lib})
+target_link_options(sdbench_analysis PRIVATE "-Wl,-z,max-page-size=16384" "-Wl,--exclude-libs,ALL")

@@ -12,6 +12,8 @@ import { fetchJobs, jobToCard } from "../js/shared/jobs.js";
 import { createChunkedAudioEngine } from "../js/chunkedAudioEngine.js";
 import { PITCH_MAX, PITCH_MIN, clampPitch } from "../js/pitchBus.js";
 import { createPlaybackContext } from "../js/audioContext.js";
+// Android: the click track, desktop's own scheduler (static/js/metronome.js, unchanged).
+import { createMetronome, computeCountIn } from "../js/metronome.js";
 // Per-stem label + color, keyed by the backend stem name. Unknown names fall
 // back to a rotating palette so non-standard models still render sensibly.
 const STEM_META = {
@@ -43,6 +45,8 @@ const FILTERS = ["All", "Favorites"];
 // ─── Web Audio engine (reused from desktop: ../js/audioEngine.js) ───
 let engine = null;
 let engineTrackId = null;
+let metronome = null; // Android: the click track for the current engine
+let countInGeneration = 0; // Android: bumped by pause/stop, so a pending count-in is dropped
 let engineToken = 0; // guards against races when switching tracks mid-decode
 let engineReady = false; // true once the current engine has decodable stems
 let pendingPlay = false;
@@ -96,7 +100,20 @@ const PROCESSORS = [
 fetch("/api/settings").then((r) => r.json()).then((s) => {
   if (s && (s.stem_format === "mp3" || s.stem_format === "wav")) state.stemFormat = s.stem_format;
   if (s && typeof s.gpu === "boolean") state.processor = s.gpu ? "gpu" : "cpu";
-  if (state.tab === "extract") render();
+  // Android: the click track's settings, kept by the app (see Settings.kt).
+  const c = s && s.click;
+  if (c && typeof c === "object") {
+    if (typeof c.on === "boolean") state.click.on = c.on;
+    if (typeof c.volume === "number") state.click.volume = Math.max(0, Math.min(1, c.volume));
+    if (Number.isInteger(c.accent)) state.click.accent = c.accent;
+    if (Number.isInteger(c.count_in)) state.click.countIn = c.count_in;
+    applyClickSettings();
+  }
+  render();
+}).catch(() => {});
+// Android: which models the first song will download (the Extract screen says so).
+fetch("/api/config").then((r) => r.json()).then((c) => {
+  if (c && c.models) { state.models = c.models; if (state.tab === "extract") render(); }
 }).catch(() => {});
 
 const state = {
@@ -126,6 +143,10 @@ const state = {
   // "all" = plain Vocals lane (default); "split" = also run the on-demand
   // lead/backing split (#275) once the base separation finishes.
   vocalSplitMode: "all",
+  // Android: the click track. `mult` (half/double time) is per song, as on desktop.
+  click: { on: false, volume: 0.6, accent: -1, countIn: 0, mult: 1 },
+  exportClick: false, // include the click in "Export mix" (opt-in, as on desktop)
+  models: null, // { separation, beat }: downloaded yet?
 };
 
 let extractES = null; // EventSource for the active extraction
@@ -182,6 +203,150 @@ function effectiveGain(name) {
 function applyMix() {
   if (!engine) return;
   for (const l of lanes()) engine.setGain(l.name, effectiveGain(l.name));
+}
+
+// ─── Android: click track ───
+// The beat grid comes from stems/beats.json (made after separation, as on
+// desktop); the scheduler is desktop's metronome.js, which places each click
+// in the engine's source time, so it follows speed changes and seeks.
+
+// Where beat `i` sits in its bar, from the detected bar marks
+// (desktop's beatgrid.js barPositionIndex).
+function barPosition(i, bars) {
+  if (!bars || !bars.length) return null;
+  let mark = null;
+  for (const b of bars) {
+    if (b.beat <= i) mark = b;
+    else break;
+  }
+  if (!mark || !Number.isInteger(mark.beats_per_bar) || mark.beats_per_bar < 1) return null;
+  return [(i - mark.beat) % mark.beats_per_bar, mark.beats_per_bar];
+}
+
+function currentGrid() {
+  const g = state.current?.grid;
+  return g && Array.isArray(g.beats) && g.beats.length ? g : null;
+}
+
+// Desktop's applyMetronomeAccent: Auto follows the detected bar marks;
+// an explicit meter (or Off) counts from the first beat.
+function applyClickAccent() {
+  if (!metronome) return;
+  const bars = currentGrid()?.bars || [];
+  metronome.setGrouping?.(null);
+  if (state.click.accent < 0 && bars.length) {
+    metronome.setDownbeatFn?.((i) => barPosition(i, bars)?.[0] === 0);
+    metronome.setBarPositionFn?.((i) => barPosition(i, bars));
+  } else {
+    metronome.setDownbeatFn?.(null);
+    metronome.setBarPositionFn?.(null);
+    metronome.setBeatsPerBar?.(Math.max(0, state.click.accent));
+  }
+}
+
+function applyClickSettings() {
+  if (!metronome) return;
+  metronome.setVolume(state.click.volume);
+  metronome.setMultiplier(state.click.mult);
+  applyClickAccent();
+  metronome.setEnabled(state.click.on);
+}
+
+// Called when the engine is ready and when the grid arrives, in either order.
+function setupClick() {
+  const grid = currentGrid();
+  if (metronome || !grid || !engine || !engineReady || engineTrackId !== state.current?.id) return;
+  metronome = createMetronome(engine, grid.beats, { volume: state.click.volume });
+  applyClickSettings();
+}
+
+function teardownClick() {
+  countInGeneration++;
+  if (metronome) { metronome.destroy(); metronome = null; }
+}
+
+function saveClickSettings() {
+  const { on, volume, accent, countIn } = state.click;
+  fetch("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ click: { on, volume, accent, count_in: countIn } }),
+  }).catch(() => {});
+}
+
+// Desktop's _armCountIn: start the audio late (engine.play(leadIn)) and play
+// the count clicks in the gap, whether or not the running click is on.
+// Returns true when it started playback itself.
+function armCountIn(startPos) {
+  const grid = currentGrid();
+  if (state.click.countIn < 1 || !engine?.supportsCountIn || !metronome || !grid) return false;
+  const { leadIn, clicks } = computeCountIn(grid.beats, grid.bars || [], {
+    countBars: state.click.countIn,
+    multiplier: metronome.getMultiplier?.() ?? 1,
+    accentMode: state.click.accent,
+    start: startPos,
+  });
+  if (leadIn <= 0 || !clicks.length) return false;
+  const sourceClicks = clicks.map((c) => ({ time: startPos - leadIn + c.offset, level: c.level, accent: c.accent }));
+  const generation = ++countInGeneration;
+  const clickTrack = metronome;
+  engine.play(leadIn).then((started) => {
+    if (!started || generation !== countInGeneration) return;
+    clickTrack.playCountIn(sourceClicks);
+  });
+  return true;
+}
+
+// Beats and bar starts as a strip under the waveform (detected grid).
+function beatStrip() {
+  const g = currentGrid();
+  const dur = curDuration();
+  if (!g || !dur) return "";
+  const x = (t) => ((t / dur) * 1000).toFixed(1);
+  let beats = "";
+  for (const t of g.beats) beats += `M${x(t)} 5V12`;
+  let bars = "";
+  const marks = g.bars || [];
+  for (let m = 0; m < marks.length; m++) {
+    const end = m + 1 < marks.length ? marks[m + 1].beat : g.beats.length;
+    const n = marks[m].beats_per_bar;
+    if (!(n >= 1)) continue;
+    for (let i = marks[m].beat; i < end; i += n) if (i >= 0 && i < g.beats.length) bars += `M${x(g.beats[i])} 0V12`;
+  }
+  return `<svg class="beat-strip" viewBox="0 0 1000 12" preserveAspectRatio="none" aria-hidden="true">` +
+    `<path d="${beats}" class="bs-beat"/><path d="${bars}" class="bs-bar"/></svg>`;
+}
+
+const ACCENTS = [
+  [-1, "Accent: auto"], [0, "Accent: off"], [2, "2/4"], [3, "3/4"], [4, "4/4"], [5, "5/4"],
+  [6, "6/8"], [7, "7/8"], [9, "9/8"], [12, "12/8"],
+];
+const COUNT_INS = [[0, "Count-in: off"], [1, "Count-in: 1 bar"], [2, "Count-in: 2 bars"], [3, "Count-in: 3 bars"], [4, "Count-in: 4 bars"]];
+
+function clickRows() {
+  const g = currentGrid();
+  const c = state.click;
+  if (!g) {
+    const why = state.current?.detail?.notes?.beats;
+    return why ? `<div class="click-note">${esc(why)}</div>` : "";
+  }
+  const pct = Math.round(c.volume * 100);
+  const opt = (list, v) => list.map(([val, label]) => `<option value="${val}"${val === v ? " selected" : ""}>${label}</option>`).join("");
+  // An explicit meter the presets do not have (set on another device) still shows.
+  const accents = ACCENTS.some(([v]) => v === c.accent) ? ACCENTS : [...ACCENTS, [c.accent, `${c.accent} beats`]];
+  const mult = metronome?.getMultiplier?.() ?? c.mult;
+  return `<div class="speed-row click-row">
+        <span class="speed-row-label">Click</span>
+        <button class="click-toggle${c.on ? " on" : ""}" data-action="click-toggle" aria-pressed="${c.on}">${c.on ? "On" : "Off"}</button>
+        <input type="range" class="speed-slider" data-click-vol min="0" max="1" step="0.05" value="${c.volume}" aria-label="Click volume">
+        <span class="speed-row-val">${pct}%</span>
+      </div>
+      <div class="click-opts">
+        <select class="click-select" data-click-accent aria-label="Accent">${opt(accents, c.accent)}</select>
+        <div class="segmented sm click-rate" role="radiogroup" aria-label="Click rate">${[[0.5, "½×"], [1, "1×"], [2, "2×"]]
+          .map(([m, l]) => `<button class="${mult === m ? "on" : ""}" data-action="click-mult" data-mult="${m}" role="radio" aria-checked="${mult === m}">${l}</button>`).join("")}</div>
+        <select class="click-select" data-click-countin aria-label="Count-in">${opt(COUNT_INS, c.countIn)}</select>
+      </div>`;
 }
 
 function cap(s) {
@@ -254,10 +419,25 @@ async function openTrack(card, { autoplay = false } = {}) {
   state.pitch = 0;
   render();
 
+  teardownClick(); // Android
   if (engine) { engine.destroy(); engine = null; engineTrackId = null; }
   engineReady = false;
   const token = ++engineToken;
   pendingPlay = autoplay;
+  state.click.mult = 1; // Android: half/double time is per song, as on desktop
+
+  // Android: the click track's beat grid, alongside the detail (404 when the
+  // song has none, e.g. separated before 1.1).
+  state.current.grid = null;
+  fetch(`/api/jobs/${card.id}/stems/beats.json`, { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((g) => {
+      if (token !== engineToken || !g || !state.current) return;
+      state.current.grid = g;
+      setupClick();
+      render();
+    })
+    .catch(() => {});
 
   let detail;
   try {
@@ -297,6 +477,7 @@ async function openTrack(card, { autoplay = false } = {}) {
     lanes: laneList,
     hasVideo: !!detail.has_video,
     analysis: extractAnalysis(detail, laneList),
+    notes: detail.analysis_notes || {}, // Android: why the beat grid or key is missing
   };
   state.current.loading = false;
   state.current.stemCount = laneList.length;
@@ -327,6 +508,7 @@ async function openTrack(card, { autoplay = false } = {}) {
   }
   engineReady = true;
   applyMix();
+  setupClick(); // Android
   render();
   if (pendingPlay) { pendingPlay = false; engine.play(); state.playing = engine.isPlaying(); render(); }
 }
@@ -358,8 +540,17 @@ function togglePlay() {
     pendingPlay = true;
     return;
   }
-  if (engine.isPlaying()) engine.pause();
-  else engine.play();
+  if (engine.isPlaying()) {
+    engine.pause();
+    countInGeneration++; // Android: drop a count-in still waiting to start
+    metronome?.cancelCountIn?.();
+  } else {
+    // Android: count in, leading into where playback starts (desktop's transport).
+    let startPos = engine.getCurrentTime?.() ?? 0;
+    const dur = curDuration();
+    if (dur > 0 && startPos >= dur) startPos = 0;
+    if (!armCountIn(startPos)) engine.play();
+  }
   state.playing = engine.isPlaying();
   render();
 }
@@ -389,8 +580,25 @@ function exportMix(kind) {
   }
   if (!names.length) { toast("Every stem is muted — nothing to export."); return; }
   const q = new URLSearchParams({ stems: names.join(","), gains: gains.map((g) => g.toFixed(3)).join(",") });
+  // Android: the click, as the user monitors it (desktop's _clickParams).
+  if (state.exportClick && currentGrid()) {
+    q.set("click", "1");
+    q.set("click_mult", String(metronome?.getMultiplier?.() ?? state.click.mult));
+    q.set("click_accent", String(state.click.accent));
+    q.set("click_gain", state.click.volume.toFixed(3));
+  }
   const path = kind === "mp4" ? `video.mp4` : `mixdown.wav`;
   triggerDownload(`/api/jobs/${id}/${path}?${q}`);
+}
+
+// Android: the stems the Mixer has active (not muted or soloed out), in one
+// ZIP named after the song (desktop's stems/all.zip).
+function exportStemsZip() {
+  const id = state.current?.id;
+  if (!id || !lanes().length) return;
+  const names = lanes().filter((l) => effectiveGain(l.name) > 0).map((l) => l.name);
+  if (!names.length) { toast("Every stem is muted — nothing to export."); return; }
+  triggerDownload(`/api/jobs/${id}/stems/all.zip?${new URLSearchParams({ stems: names.join(",") })}`);
 }
 
 let _toastTimer = null;
@@ -475,10 +683,27 @@ function analysisBody() {
   const presenceHtml = a && a.presence.length
     ? `<div class="eyebrow">STEM PRESENCE</div>${a.presence.map((p) => `<div class="presence-row"><div class="presence-name">${esc(p.name)}</div><div class="presence-bar"><i style="width:${p.val}%;background:${p.color}"></i></div><span class="presence-val">${p.val}%</span></div>`).join("")}`
     : "";
-  const exportBtns = `<button class="cta sm" data-action="export" data-kind="wav">${ICON.download}Export mix</button>${
+  // Android: the click track's beat grid, or why the song has none.
+  const g = currentGrid();
+  const notes = state.current?.detail?.notes || {};
+  let gridHtml = "";
+  if (g) {
+    const marks = g.bars || [];
+    const meter = marks.length === 1 ? `${marks[0].beats_per_bar} beats a bar` : marks.length > 1 ? `meter changes ${marks.length - 1}×` : "no bar marks";
+    gridHtml = `<div class="eyebrow">BEAT GRID</div><div class="grid-info">
+      <div class="gi-main">${Number(g.bpm).toFixed(1)} BPM · ${g.confidence}% of beats on a drum hit</div>
+      <div class="gi-sub">${g.beats.length} beats · ${esc(meter)} · from the ${esc(g.source)} by Beat This!</div></div>`;
+  } else if (notes.beats) {
+    gridHtml = `<div class="eyebrow">BEAT GRID</div><div class="grid-info"><div class="gi-sub">${esc(notes.beats)}</div></div>`;
+  }
+  const keyNote = notes.key ? `<div class="grid-info" style="margin-top:8px"><div class="gi-sub">${esc(notes.key)}</div></div>` : "";
+  const clickOpt = g
+    ? `<button class="check-row" data-action="export-click" aria-pressed="${state.exportClick}"><span class="check${state.exportClick ? " on" : ""}">${state.exportClick ? ICON.check : ""}</span>Include the click track</button>`
+    : "";
+  const exportBtns = `${clickOpt}<button class="cta sm" data-action="export" data-kind="wav">${ICON.download}Export mix</button>${
     hasVideo ? `<button class="cta sm" data-action="export" data-kind="mp4" style="margin-top:10px">${ICON.download}Export MP4 (with video)</button>` : ""
-  }`;
-  return `<div class="pad" style="padding-top:16px">${statsHtml}${presenceHtml}${exportBtns}</div>`;
+  }<button class="cta sm ghost" data-action="export-zip">${ICON.download}Export stems (ZIP)</button>`;
+  return `<div class="pad" style="padding-top:16px">${statsHtml}${gridHtml}${keyNote}${presenceHtml}${exportBtns}</div>`;
 }
 
 /**
@@ -536,6 +761,7 @@ function mixerScreen() {
       </div>
       <div class="wave">
         <div class="wave-bars" data-seek>${mainWaveform()}<div class="playhead" style="left:${state.progress * 100}%"></div></div>
+        ${beatStrip() /* Android */}
         <div class="wave-times"><span class="cur">${fmt(state.progress * dur)}</span><span class="dur">${fmt(dur)}</span></div>
       </div>
       <div class="transport">
@@ -549,6 +775,7 @@ function mixerScreen() {
         <span class="speed-row-val">${state.speed % 1 === 0 ? state.speed.toFixed(1) : state.speed}x</span>
       </div>
       ${keyRow()}
+      ${clickRows() /* Android */}
       ${preparing ? '<div class="mx-prep">Preparing audio…</div>' : ""}
       <div class="segmented">
         <button class="${state.mixerView === "stems" ? "on" : ""}" data-action="mixview" data-view="stems">Stems</button>
@@ -663,9 +890,25 @@ function extractScreen() {
         return `<button class="chip-btn ${on ? "on" : ""}" style="${on ? "border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.06);" : ""}" data-action="processor" data-id="${f.id}"><span class="nm">${f.name}<br><span style="font-size:11.5px;font-weight:500;color:var(--muted)">${f.note}</span></span>${on ? ICON.check : ""}</button>`;
       }).join("")}</div>
       <button class="cta" style="margin-top:22px" data-action="split">${ICON.scissors}Extract stems</button>
+      ${modelNote() /* Android */}
       ${extractProgressCard()}
     </div>
   </div>`;
+}
+
+function refreshModels() {
+  fetch("/api/config").then((r) => r.json()).then((c) => { if (c && c.models) state.models = c.models; }).catch(() => {});
+}
+
+// Android: what the next song will download first, once.
+function modelNote() {
+  const m = state.models;
+  if (!m) return "";
+  const need = [];
+  if (!m.separation) need.push("the separation model (55 MB)");
+  if (!m.beat) need.push("the beat model for the click track (82 MB)");
+  if (!need.length) return "";
+  return `<div class="model-note">The first song downloads ${need.join(" and ")}, once.</div>`;
 }
 
 // Submit an extraction (URL or file) and follow it to completion.
@@ -760,6 +1003,7 @@ function _onExtractState(jobId, s) {
       else if (s.status === "error") toast("Extraction failed.");
       _finishExtractJob(jobId);
     }
+    refreshModels(); // Android: the first song may have downloaded the models
     return true; // terminal for the base-job follow (SSE/poll can stop)
   }
   return false;
@@ -926,6 +1170,7 @@ async function deleteTrack(id) {
   state.tracks = state.tracks.filter((t) => t.id !== id);
   if (!state.tracks.length) state.libState = "empty";
   if (state.current?.id === id) {
+    teardownClick(); // Android
     if (engine) { engine.destroy(); engine = null; engineTrackId = null; engineReady = false; }
     state.current = null;
     state.playing = false;
@@ -975,6 +1220,27 @@ function wireFaders() {
       if (engine) engine.setPlaybackRate(rate);
     });
   }
+
+  // Android: click volume, accent and count-in.
+  const clickVol = app.querySelector("[data-click-vol]");
+  if (clickVol) {
+    clickVol.addEventListener("input", () => {
+      state.click.volume = Math.max(0, Math.min(1, parseFloat(clickVol.value)));
+      const valEl = clickVol.parentElement?.querySelector(".speed-row-val");
+      if (valEl) valEl.textContent = `${Math.round(state.click.volume * 100)}%`;
+      metronome?.setVolume(state.click.volume);
+    });
+    clickVol.addEventListener("change", saveClickSettings);
+  }
+  app.querySelector("[data-click-accent]")?.addEventListener("change", (e) => {
+    state.click.accent = parseInt(e.target.value, 10);
+    applyClickAccent();
+    saveClickSettings();
+  });
+  app.querySelector("[data-click-countin]")?.addEventListener("change", (e) => {
+    state.click.countIn = parseInt(e.target.value, 10) || 0;
+    saveClickSettings();
+  });
 
   app.querySelectorAll("[data-key-step]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1062,6 +1328,21 @@ app.addEventListener("click", (e) => {
       state.solo[t.dataset.id] = !state.solo[t.dataset.id];
       applyMix();
       break;
+    case "click-toggle": // Android
+      state.click.on = !state.click.on;
+      metronome?.setEnabled(state.click.on);
+      saveClickSettings();
+      break;
+    case "click-mult": // Android
+      state.click.mult = Number(t.dataset.mult);
+      metronome?.setMultiplier(state.click.mult);
+      break;
+    case "export-click": // Android
+      state.exportClick = !state.exportClick;
+      break;
+    case "export-zip": // Android
+      exportStemsZip();
+      return;
     case "processor": // Android
       state.processor = t.dataset.id;
       fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gpu: state.processor === "gpu" }) })

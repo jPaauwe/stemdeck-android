@@ -62,4 +62,6 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
+    // ONNX Runtime's native library, for timing the app's beat model.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
 }

@@ -74,3 +74,16 @@ object OrigNative : EngineNative {
     override fun separate(model: String, song: String, outDir: String, threads: Int, chunkSeconds: Int) =
         nSeparate(model, song, outDir, threads, chunkSeconds)
 }
+
+/**
+ * The analysis stages the app runs after separation (/analysis): the beat
+ * grid (Beat This! on ONNX Runtime) and the key, timed. Same code as the app.
+ */
+object AnalysisNative {
+    init { System.loadLibrary("sdbench_analysis") }
+    /** JSON: seconds per step, beat count and BPM, or an error. */
+    @JvmStatic external fun nBeatGrid(wav: String, model: String, threads: Int, provider: String): String
+    /** JSON: seconds and the key, from <dir>/{guitar,piano,other,vocals,bass}.wav. */
+    @JvmStatic external fun nKey(dir: String): String
+    @JvmStatic external fun nOrtVersion(): String
+}

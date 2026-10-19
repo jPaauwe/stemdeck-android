@@ -292,20 +292,68 @@ class BenchActivity : Activity() {
             runs += appAll to w
             if (hasGpu) runs += appGpu to w
         }
+        var stems: File? = null  // one app-engine separation, kept for section 3
         for ((v, w) in runs) {
             setup(v)
             val outDir = File(work, "full-${v.key}-$w").apply { mkdirs() }
             val rss = PeakRss()
             val js = JSONObject(v.eng.separate(model, song, outDir.path, w, 24))
             val peak = rss.finish()
-            outDir.deleteRecursively()
+            if (stems == null && v.eng === OptNative && !js.has("error")) stems = outDir else outDir.deleteRecursively()
             if (js.has("error")) { out("  ${v.label}, $w at once: ${js.getString("error")}"); continue }
             val sec = js.getDouble("seconds")
             out("  %-26s %d at once: %6.1f s  = %.2fx song length   peak memory %.2f GB   thermal %s".format(
                 v.label, w, sec, sec / songSeconds, peak / 1e6, thermal()))
         }
         OptNative.nSetCompute(0, true)
+
+        // 3. The analysis the app runs after separation, on those stems.
+        analysis(work, song, stems, songSeconds)
         out("\nDone. Tap Copy and paste the results to Claude.")
+    }
+
+    /**
+     * Section 3: the beat grid (Beat This! on ONNX Runtime) on the drums stem
+     * with ONNX Runtime's CPU provider at a few thread counts, XNNPACK and
+     * NNAPI (whether they are faster, and whether they find the same beats),
+     * and the key from the harmony stems.
+     */
+    private fun analysis(work: File, song: String, kept: File?, songSeconds: Int) {
+        out("\n3. Analysis after separation, on the ${songSeconds} s test song's stems")
+        out("  ONNX Runtime ${AnalysisNative.nOrtVersion()}")
+        val stems = kept ?: File(work, "analysis").apply {
+            mkdirs()
+            OptNative.nSetCompute(0, true)
+            val js = JSONObject(OptNative.separate(ModelManager(this@BenchActivity).modelFile.path, song, path, 2, 24))
+            if (js.has("error")) { out("  could not separate: ${js.getString("error")}"); return }
+        }
+        val beatModels = ModelManager.beatThis(this)
+        if (!beatModels.isReady()) out("  Downloading the beat model (82 MB, first run only)…")
+        val beatModel = beatModels.ensure { true }.path
+        val drums = File(stems, "drums.wav").path
+        var reference: String? = null
+        val variants = listOf(
+            "CPU, default threads" to (0 to ""), "CPU, 2 threads" to (2 to ""), "CPU, 4 threads" to (4 to ""),
+            "CPU, 6 threads" to (6 to ""), "CPU, 8 threads" to (8 to ""),
+            "XNNPACK, 4 threads" to (4 to "XNNPACK"), "NNAPI" to (0 to "NNAPI"),
+        )
+        for ((label, cfg) in variants) {
+            val rss = PeakRss()
+            val js = JSONObject(AnalysisNative.nBeatGrid(drums, beatModel, cfg.first, cfg.second))
+            val peak = rss.finish()
+            if (js.has("error")) { out("  beat grid, %-22s failed: %s".format(label, js.getString("error"))); continue }
+            val beats = js.getJSONArray("beats").toString()
+            if (reference == null) reference = beats
+            val same = if (beats == reference) "same beats" else "DIFFERENT beats"
+            out("  beat grid, %-22s %6.2f s = %.3fx song length (model %.2f s, log-mel %.2f s, decode %.2f s, clean-up %.2f s)  %s  peak memory %.2f GB  thermal %s".format(
+                label, js.getDouble("seconds"), js.getDouble("seconds") / songSeconds, js.getDouble("model"), js.getDouble("mel"),
+                js.getDouble("load"), js.getDouble("grid"), if (js.getBoolean("ok")) "%d beats, %.1f BPM, %s".format(js.getJSONArray("beats").length(), js.getDouble("bpm"), same) else "no grid (${js.getString("why")})",
+                peak / 1e6, thermal()))
+        }
+        val key = JSONObject(AnalysisNative.nKey(stems.path))
+        if (key.has("error")) out("  key: failed: ${key.getString("error")}")
+        else out("  key: %.2f s = %.3fx song length (%s)".format(key.getDouble("seconds"), key.getDouble("seconds") / songSeconds, key.getString("key")))
+        stems.deleteRecursively()
     }
 
     private fun table(rows: JSONArray, totalMs: Double, nameIdx: Int, msIdx: Int, callsIdx: Int) {

@@ -9,19 +9,25 @@ import java.security.MessageDigest
 import java.util.concurrent.CancellationException
 
 /**
- * The htdemucs_6s weights in demucs.cpp's ggml format. Downloaded once on
- * first use (desktop StemDeck does the same on its first launch) and checked
- * against a pinned SHA-256 before it is ever loaded.
+ * A model file, downloaded once on first use and checked against a pinned
+ * SHA-256 before it is ever loaded. By default the htdemucs_6s weights in
+ * demucs.cpp's ggml format; [beatThis] is the app's beat model.
  */
-class ModelManager(context: Context) {
+class ModelManager(
+    context: Context,
+    private val FILE_NAME: String = "ggml-model-htdemucs-6s-f16.bin",
+    // Pinned to a revision of the dataset, so the file cannot change under us.
+    private val URL_STRING: String = "https://huggingface.co/datasets/Retrobear/demucs.cpp/resolve/" +
+        "8f58ac0491bbea657275bcd3e38af1ab3a27bfc9/ggml-model-htdemucs-6s-f16.bin",
+    private val SHA256: String = "09704f4ceae204e56e77d5eefd6ac71d7275be81fd507e6913371d59abcee856",
+) {
     companion object {
-        const val FILE_NAME = "ggml-model-htdemucs-6s-f16.bin"
-
-        // Pinned to a revision of the dataset, so the file cannot change under us.
-        const val URL_STRING =
-            "https://huggingface.co/datasets/Retrobear/demucs.cpp/resolve/" +
-                "8f58ac0491bbea657275bcd3e38af1ab3a27bfc9/$FILE_NAME"
-        const val SHA256 = "09704f4ceae204e56e77d5eefd6ac71d7275be81fd507e6913371d59abcee856"
+        /** The same file and checksum as the app (app/.../engine/ModelStore.kt). */
+        fun beatThis(context: Context) = ModelManager(
+            context, "beat_this_final0.onnx",
+            "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/beat_this_final0.onnx",
+            "80d04915143f9fcef27223dfe03cd4569bf5c7c9ff4cd7a34918e4b1424c682c",
+        )
     }
 
     private val dir = File(context.filesDir, "models").apply { mkdirs() }
