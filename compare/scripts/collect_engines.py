@@ -87,6 +87,11 @@ def export(repo, ref, loc, dest):
                 fh.write(tar.extractfile(m).read())
 
 
+
+def clean(text):
+    """CMake splits lists on ";" and this file on "|"."""
+    return text.replace(";", ",").replace("|", "/")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("repo")
@@ -123,7 +128,7 @@ def main():
         export(a.repo, ref, loc, os.path.join(a.out, vid))
         label = f"build {first}" if first == last else f"builds {first}–{last}"
         subject = git(a.repo, "log", "-1", "--format=%s", ref) or ""
-        lines.append(f"{vid}|{label}|{subject}")
+        lines.append(f"{vid}|{label}|{clean(subject)}")
     if not newest_same:
         dest = os.path.join(a.out, "head")
         os.makedirs(dest)
@@ -132,7 +137,7 @@ def main():
         shutil.copy(os.path.join(src, "engine.hpp"), dest)
         shutil.copytree(os.path.join(src, "demucs"), os.path.join(dest, "demucs"))
         subject = git(a.repo, "log", "-1", "--format=%s") or ""
-        lines.append(f"head|this build|{subject} (plus any changes since)")
+        lines.append(f"head|this build|{clean(subject)} (plus any changes since)")
 
     with open(os.path.join(a.out, "engines.txt"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")

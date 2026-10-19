@@ -25,7 +25,7 @@ if(NOT collect_result EQUAL 0)
   message(FATAL_ERROR "collecting engine versions failed:\n${collect_error}")
 endif()
 message(STATUS "Engine versions:\n${collect_output}")
-file(STRINGS "${ENGINES_DIR}/engines.txt" engine_lines)
+file(STRINGS "${ENGINES_DIR}/engines.txt" engine_lines ENCODING UTF-8)
 
 find_library(log-lib log)
 
