@@ -3,6 +3,7 @@ package org.stemdeckport.android
 import android.app.ActivityManager
 import android.app.Application
 import org.stemdeckport.android.data.JobStore
+import org.stemdeckport.android.data.Settings
 import org.stemdeckport.android.engine.ModelManager
 import org.stemdeckport.android.engine.NativeEngine
 import org.stemdeckport.android.server.LocalServer
@@ -14,10 +15,12 @@ class App : Application() {
         private set
     lateinit var models: ModelManager
         private set
+    lateinit var settings: Settings
+        private set
 
     /** Started on first use, so a process woken only for the service skips it. */
     val server: LocalServer by lazy {
-        LocalServer(this, store) { SeparationService.start(this) }.also { it.startServer() }
+        LocalServer(this, store, settings) { SeparationService.start(this) }.also { it.startServer() }
     }
 
     override fun onCreate() {
@@ -30,6 +33,7 @@ class App : Application() {
         val base = getExternalFilesDir(null) ?: filesDir
         store = JobStore(File(base, "jobs"))
         models = ModelManager(this)
+        settings = Settings(this)
         store.onStopRequested = { NativeEngine.cancel() }
     }
 

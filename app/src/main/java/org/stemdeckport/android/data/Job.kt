@@ -28,13 +28,15 @@ class Job(
     var favorite: Boolean = false
     var trashedAt: Double? = null
     var computeSeconds: Double? = null
+    /** File type of the stems: "mp3" or "wav". Songs from before MP3 support are "wav". */
+    var format: String = "wav"
 
     /** Bumped on every change; the SSE stream sends a frame when it moves. */
     @Volatile var version: Long = 0
 
     val finished: Boolean get() = status in FINISHED
 
-    fun stemUrl(name: String) = "/api/jobs/$id/stems/$name.wav"
+    fun stemUrl(name: String) = "/api/jobs/$id/stems/$name.$format"
 
     fun toState(): JSONObject = JSONObject().apply {
         put("job_id", id)
@@ -65,6 +67,7 @@ class Job(
         put("trashed_at", trashedAt ?: JSONObject.NULL)
         put("favorite", favorite)
         put("created_at", createdAt)
+        put("stem_format", format)
     }
 
     fun toRecord(): JSONObject = toState().apply {
@@ -98,6 +101,7 @@ class Job(
             job.favorite = o.optBoolean("favorite", false)
             job.trashedAt = optD("trashed_at")
             job.computeSeconds = optD("compute_seconds")
+            job.format = o.optString("stem_format", "wav").takeIf { it == "mp3" } ?: "wav"
             return job
         }
     }

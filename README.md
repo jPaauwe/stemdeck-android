@@ -23,14 +23,20 @@ the same key, so a new APK installs over the old one and keeps your library.
 
 ## Using it
 
-- **Extract** → *Upload audio file* → pick stems → *Extract stems*. Or, from
-  the Files app or a download, **Share → StemDeck**.
+- **Extract** → *Upload audio file* → pick stems and the file format →
+  *Extract stems*. Or, from the Files app or a download, **Share → StemDeck**.
 - Separation runs in the background with a notification (tap *Cancel* there to
   stop). The screen can be off.
 - **Mixer**: mute, solo and volume per stem, speed and key, seek. **Analysis**:
   loudness, peak, dynamic range and how present each stem is.
   *Export mix* saves what you hear to `Download/StemDeck/`.
-- Stems are 16-bit WAV files in
+- Stems are **320 kbps MP3** files by default (about 2.4 MB a minute each).
+  Choose **WAV** under *File format* on the Extract screen for lossless 16-bit
+  stems (about 10 MB a minute each). The choice is remembered, applies to new
+  songs and to *Export mix*, and songs already in the library keep their
+  format. The MP3s are gapless, so the stems stay in sync with each other and
+  with the original.
+- Stems are in
   `Android/data/org.stemdeckport.android/files/jobs/<id>/stems/`, reachable
   over USB from a computer. They are removed if you uninstall the app.
 
@@ -110,6 +116,11 @@ builds every engine version from the `build-*` tags.
   original to float rounding. Each change is marked "StemDeck Android".
 - Demucs and the `htdemucs_6s` weights: MIT, © Meta Platforms.
 - Eigen: MPL 2.0. NanoHTTPD: BSD 3-Clause.
+- [LAME](https://lame.sourceforge.io) 3.100, the MP3 encoder and decoder:
+  LGPL 2.0 or later. It is not stored in this repository: the build downloads
+  the release tarball, checks its SHA1 (`app/src/main/cpp/lame/CMakeLists.txt`)
+  and builds it unchanged as its own library, `libmp3lame.so`, which the app
+  links dynamically.
 - The SoundTouch-based and Signalsmith Stretch worklets in
   `assets/web/vendor`, as shipped by StemDeck, under the MIT licences in
   their headers.

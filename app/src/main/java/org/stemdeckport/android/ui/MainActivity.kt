@@ -28,7 +28,7 @@ import androidx.core.view.WindowInsetsCompat
 import org.stemdeckport.android.App
 import org.stemdeckport.android.BuildConfig
 import org.stemdeckport.android.Diagnostics
-import org.stemdeckport.android.data.Mixdown
+import org.stemdeckport.android.data.MixExport
 import org.stemdeckport.android.engine.NativeEngine
 import org.stemdeckport.android.server.LocalServer
 import org.stemdeckport.android.work.SeparationService
@@ -199,7 +199,7 @@ class MainActivity : ComponentActivity() {
                     staged.outputStream().use { input.copyTo(it, 1 shl 16) }
                 } ?: throw IllegalStateException("The shared file could not be read.")
                 val title = LocalServer.titleFrom(name)
-                app.store.create(title, "local:${name.substringBeforeLast('.')}", NativeEngine.SOURCES, staged)
+                app.store.create(title, "local:${name.substringBeforeLast('.')}", NativeEngine.SOURCES, staged, app.settings.stemFormat)
                 SeparationService.start(this)
                 runOnUiThread {
                     Toast.makeText(this, "Separating “$title”", Toast.LENGTH_SHORT).show()
@@ -228,22 +228,24 @@ class MainActivity : ComponentActivity() {
         val names = url.getQueryParameter("stems")?.split(',')?.filter { it in job.stems } ?: job.stems
         val gains = url.getQueryParameter("gains")?.split(',')?.map { it.toFloatOrNull() ?: 1f }
         if (names.isEmpty()) return
-        val files = names.map { app.store.stemFile(job.id, it) }
         val g = names.indices.map { gains?.getOrNull(it)?.coerceIn(0f, 2f) ?: 1f }
-        val fileName = "${LocalServer.safeFileName(job.title)} (mix).wav"
+        val format = app.settings.stemFormat
+        val fileName = "${LocalServer.safeFileName(job.title)} (mix).$format"
         Toast.makeText(this, "Exporting the mix…", Toast.LENGTH_SHORT).show()
         thread(name = "export") {
             try {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
+                    put(MediaStore.MediaColumns.MIME_TYPE, MixExport.mimeType(format))
                     put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/StemDeck")
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
                 val target = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                     ?: throw IllegalStateException("Could not create the file in Downloads.")
                 try {
-                    contentResolver.openOutputStream(target)!!.buffered(1 shl 16).use { Mixdown.write(files, g, it) }
+                    contentResolver.openOutputStream(target)!!.buffered(1 shl 16).use {
+                        MixExport.write(app.store, job, names, g, format, cacheDir, it)
+                    }
                     contentResolver.update(target, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
                 } catch (e: Exception) {
                     contentResolver.delete(target, null, null)

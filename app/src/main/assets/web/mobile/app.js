@@ -82,6 +82,18 @@ const ICON = {
 // Android: the app opens the Library (#library) after a song is shared to it.
 const INITIAL_TAB = ["library", "extract", "mixer"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "mixer";
 
+// Android: stem file formats. The choice applies to new songs and to "Export mix".
+const STEM_FORMATS = [
+  { id: "mp3", name: "MP3", note: "320 kbps · 2.4 MB a minute" },
+  { id: "wav", name: "WAV", note: "Lossless · 10 MB a minute" },
+];
+fetch("/api/settings").then((r) => r.json()).then((s) => {
+  if (s && (s.stem_format === "mp3" || s.stem_format === "wav")) {
+    state.stemFormat = s.stem_format;
+    if (state.tab === "extract") render();
+  }
+}).catch(() => {});
+
 const state = {
   tab: INITIAL_TAB,
   mixerView: "stems",
@@ -93,6 +105,7 @@ const state = {
   speed: 1.0,
   pitch: 0, // global transpose in semitones, -6..+6
   selected: { vocals: true, drums: true, bass: true, guitar: true, piano: true, other: true },
+  stemFormat: "mp3", // Android: "mp3" (320 kbps) or "wav"; loaded from /api/settings
   quality: "High",
   filter: "All",
   // Library data from /api/jobs. libState: "loading" | "ready" | "empty" | "error".
@@ -632,6 +645,12 @@ function extractScreen() {
         return `<button class="chip-btn ${on ? "on" : ""}" style="${onStyle}" data-action="chip" data-id="${s.id}"><div class="dot" style="background:${s.color}"></div><span class="nm">${s.name}</span>${on ? ICON.check : ""}</button>`;
       }).join("")}</div>
       <!-- Android: no lead/backing vocal split on the phone yet. -->
+      <!-- Android: the file format for stems and mix exports, remembered by the app. -->
+      <div class="eyebrow">FILE FORMAT</div>
+      <div class="chips">${STEM_FORMATS.map((f) => {
+        const on = state.stemFormat === f.id;
+        return `<button class="chip-btn ${on ? "on" : ""}" style="${on ? "border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.06);" : ""}" data-action="format" data-id="${f.id}"><span class="nm">${f.name}<br><span style="font-size:11.5px;font-weight:500;color:var(--muted)">${f.note}</span></span>${on ? ICON.check : ""}</button>`;
+      }).join("")}</div>
       <button class="cta" style="margin-top:22px" data-action="split">${ICON.scissors}Extract stems</button>
       ${extractProgressCard()}
     </div>
@@ -651,6 +670,7 @@ async function startExtraction() {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("stems", JSON.stringify(stems));
+    fd.append("format", state.stemFormat); // Android
     init = { method: "POST", body: fd };
     title = file.name;
   } else {
@@ -1026,6 +1046,11 @@ app.addEventListener("click", (e) => {
     case "solo":
       state.solo[t.dataset.id] = !state.solo[t.dataset.id];
       applyMix();
+      break;
+    case "format": // Android
+      state.stemFormat = t.dataset.id;
+      fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stem_format: state.stemFormat }) })
+        .catch(() => toast("Couldn't save the format."));
       break;
     case "chip":
       state.selected[t.dataset.id] = !state.selected[t.dataset.id];

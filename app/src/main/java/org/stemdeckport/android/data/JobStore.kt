@@ -7,7 +7,7 @@ import java.security.SecureRandom
 
 /**
  * The library: every job's state lives in <root>/<id>/job.json, its stems in
- * <root>/<id>/stems/<name>.wav. Thread-safe; changes wake anyone waiting in
+ * <root>/<id>/stems/<name>.mp3 (or .wav). Thread-safe; changes wake anyone waiting in
  * [awaitChange] (the SSE stream).
  */
 class JobStore(val root: File) {
@@ -27,7 +27,10 @@ class JobStore(val root: File) {
     fun jobDir(id: String) = File(root, id)
     fun stemsDir(id: String) = File(jobDir(id), "stems")
     fun workDir(id: String) = File(jobDir(id), "work")
-    fun stemFile(id: String, name: String) = File(stemsDir(id), "$name.wav")
+    fun stemFile(id: String, name: String): File {
+        val ext = synchronized(lock) { jobs[id]?.format } ?: "wav"
+        return File(stemsDir(id), "$name.$ext")
+    }
 
     private fun load() {
         val now = System.currentTimeMillis() / 1000.0
@@ -87,7 +90,7 @@ class JobStore(val root: File) {
     }
 
     /** Creates a queued job; [input] is moved into the job's folder. */
-    fun create(title: String, sourceUrl: String, selected: List<String>, input: File): Job {
+    fun create(title: String, sourceUrl: String, selected: List<String>, input: File, format: String): Job {
         val id = newId()
         val work = workDir(id).apply { mkdirs() }
         stemsDir(id).mkdirs()
@@ -98,6 +101,7 @@ class JobStore(val root: File) {
             input.delete()
         }
         val job = Job(id, title, sourceUrl, selected, System.currentTimeMillis() / 1000.0)
+        job.format = if (format == "mp3") "mp3" else "wav"
         synchronized(lock) {
             jobs[id] = job
             persist(job)

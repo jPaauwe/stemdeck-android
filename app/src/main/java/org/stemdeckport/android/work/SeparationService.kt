@@ -20,10 +20,14 @@ import org.stemdeckport.android.App
 import org.stemdeckport.android.R
 import org.stemdeckport.android.data.Job
 import org.stemdeckport.android.engine.AudioDecoder
+import org.stemdeckport.android.engine.Mp3Codec
 import org.stemdeckport.android.engine.NativeEngine
 import org.stemdeckport.android.ui.MainActivity
 import java.io.File
 import java.util.concurrent.CancellationException
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 import kotlin.math.roundToInt
 
@@ -182,16 +186,26 @@ class SeparationService : Service() {
             // 4. Separation.
             val selected = job.selectedStems.filter { it in NativeEngine.SOURCES }.ifEmpty { NativeEngine.SOURCES }
             val stemsDir = store.stemsDir(id).apply { mkdirs() }
+            val mp3 = job.format == "mp3"
+            val sepEnd = if (mp3) 0.93 else 0.99
             set("separating", "Separating stems", 0.10, persist = true)
             val rms = NativeEngine.separate(
                 prepared.path, stemsDir.path, selected.toSet(), app.separationThreads(), CHUNK_SECONDS,
             ) { f, _ ->
-                set("separating", "Separating stems", 0.10 + 0.89 * f); !stopped()
+                set("separating", "Separating stems", 0.10 + (sepEnd - 0.10) * f); !stopped()
+            }
+            val written = NativeEngine.SOURCES.filter { it in selected }
+
+            // 5. MP3 stems (320 kbps), unless the user chose WAV.
+            if (mp3) {
+                set("separating", "Saving MP3 stems", sepEnd, persist = true)
+                encodeMp3(written.map { File(stemsDir, "$it.wav") }) { f ->
+                    set("separating", "Saving MP3 stems", sepEnd + (0.99 - sepEnd) * f); !stopped()
+                }
             }
 
-            // 5. Done. Presence = each stem's RMS as a share of the loudest,
+            // 6. Done. Presence = each stem's RMS as a share of the loudest,
             // as desktop computes it.
-            val written = NativeEngine.SOURCES.filter { it in selected }
             val loudest = written.maxOf { rms[NativeEngine.SOURCES.indexOf(it)] }.takeIf { it > 0 } ?: 1.0
             val presence = written.associateWith { (rms[NativeEngine.SOURCES.indexOf(it)] / loudest * 100).roundToInt() }
             store.update(id) {
@@ -230,6 +244,44 @@ class SeparationService : Service() {
             raw.delete()
             prepared.delete()
         }
+    }
+
+    /**
+     * Encodes each WAV to a 320 kbps MP3 next to it, a few at a time, and
+     * deletes the WAV. [progress] is called on this thread; returning false
+     * stops the encoding with a CancellationException.
+     */
+    private fun encodeMp3(wavs: List<File>, progress: (Double) -> Boolean) {
+        val done = DoubleArray(wavs.size)
+        val stop = AtomicBoolean(false)
+        val errors = ConcurrentLinkedQueue<Throwable>()
+        val next = AtomicInteger(0)
+        val workers = minOf(wavs.size, maxOf(1, Runtime.getRuntime().availableProcessors() - 2))
+        val threads = List(workers) { w ->
+            thread(name = "mp3-$w") {
+                while (!stop.get()) {
+                    val i = next.getAndIncrement()
+                    if (i >= wavs.size) break
+                    val wav = wavs[i]
+                    val mp3 = File(wav.parentFile, wav.nameWithoutExtension + ".mp3")
+                    try {
+                        Mp3Codec.encode(wav, mp3) { f -> done[i] = f.toDouble(); !stop.get() }
+                        wav.delete()
+                    } catch (e: Throwable) {
+                        mp3.delete()
+                        errors += e
+                        stop.set(true)
+                    }
+                }
+            }
+        }
+        while (threads.any { it.isAlive }) {
+            if (!progress(done.average())) stop.set(true)
+            threads.firstOrNull { it.isAlive }?.join(250)
+        }
+        errors.firstOrNull { it is CancellationException }?.let { throw it }
+        errors.firstOrNull()?.let { throw it }
+        if (stop.get()) throw CancellationException()
     }
 
     private fun notifyProgress(title: String, stage: String, progress: Double) {

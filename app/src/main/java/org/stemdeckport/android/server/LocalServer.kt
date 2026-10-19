@@ -8,7 +8,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.stemdeckport.android.data.Job
 import org.stemdeckport.android.data.JobStore
-import org.stemdeckport.android.data.Mixdown
+import org.stemdeckport.android.data.MixExport
+import org.stemdeckport.android.data.Settings
 import org.stemdeckport.android.engine.NativeEngine
 import java.io.File
 import java.io.FileInputStream
@@ -29,6 +30,7 @@ import kotlin.concurrent.thread
 class LocalServer(
     private val context: Context,
     private val store: JobStore,
+    private val settings: Settings,
     private val onJobQueued: () -> Unit,
 ) : NanoHTTPD("127.0.0.1", 0) {
 
@@ -96,6 +98,13 @@ class LocalServer(
         val parts = s.uri.removePrefix("/api/").trimEnd('/').split('/')
         val method = s.method
         if (parts[0] == "config") return json(200, JSONObject().put("platform", "android"))
+        // Android: app settings (the stem file format).
+        if (parts[0] == "settings") {
+            if (method == Method.PUT || method == Method.POST) {
+                settings.apply(JSONObject(readBody(s).ifBlank { "{}" }))
+            }
+            return json(200, settings.toJson())
+        }
         if (parts[0] == "diagnostics") {
             return text(200, org.stemdeckport.android.Diagnostics.lastReport() ?: "No crash recorded.")
         }
@@ -134,8 +143,8 @@ class LocalServer(
             parts.size == 3 && parts[2] == "vocal-split" ->
                 json(501, detail("The lead/backing vocal split is not available on Android yet."))
             parts.size == 3 && parts[2] == "mixdown.wav" -> mixdown(s, job)
-            parts.size == 4 && parts[2] == "stems" && parts[3].endsWith(".wav") ->
-                stem(s, job, parts[3].removeSuffix(".wav"))
+            parts.size == 4 && parts[2] == "stems" && (parts[3].endsWith(".wav") || parts[3].endsWith(".mp3")) ->
+                stem(s, job, parts[3].substringBeforeLast('.'))
             else -> json(404, detail("not found"))
         }
     }
@@ -162,7 +171,8 @@ class LocalServer(
         // parseBody's temp file is deleted when this request ends, so take a copy now.
         val staged = File(context.cacheDir, "upload-${System.nanoTime()}.${fileName.substringAfterLast('.', "bin").take(8)}")
         File(upload).copyTo(staged, overwrite = true)
-        val job = store.create(titleFrom(fileName), "local:${fileName.substringBeforeLast('.')}", selected, staged)
+        val format = s.parameters["format"]?.firstOrNull()?.takeIf { it in Settings.FORMATS } ?: settings.stemFormat
+        val job = store.create(titleFrom(fileName), "local:${fileName.substringBeforeLast('.')}", selected, staged, format)
         onJobQueued()
         return json(200, JSONObject().put("job_id", job.id).put("status", job.status))
     }
@@ -178,23 +188,31 @@ class LocalServer(
         if (name !in job.stems) return json(404, detail("stem not found"))
         val f = store.stemFile(job.id, name)
         if (!f.isFile) return json(404, detail("stem not found"))
-        return fileWithRange(s, f, "audio/wav")
+        return fileWithRange(s, f, MixExport.mimeType(f.extension))
     }
 
     private fun mixdown(s: IHTTPSession, job: Job): Response {
         val names = s.parameters["stems"]?.firstOrNull()?.split(',')?.filter { it in job.stems } ?: job.stems
         val gains = s.parameters["gains"]?.firstOrNull()?.split(',')?.map { it.toFloatOrNull() ?: 1f }
         if (names.isEmpty()) return json(400, detail("nothing to mix"))
-        val files = names.map { store.stemFile(job.id, it) }
         val g = names.indices.map { gains?.getOrNull(it)?.coerceIn(0f, 2f) ?: 1f }
-        val length = Mixdown.outputBytes(files)
-        val pipeIn = PipedInputStream(1 shl 16)
+        val format = settings.stemFormat
+        // Streamed as it is made. The work stops when the reader goes away
+        // (the WebView hands downloads to the app and drops this request).
+        val pipeIn = object : PipedInputStream(1 shl 16) {
+            @Volatile var closed = false
+            override fun close() { closed = true; super.close() }
+        }
         val pipeOut = PipedOutputStream(pipeIn)
         thread(name = "mixdown") {
-            try { pipeOut.use { Mixdown.write(files, g, it) } } catch (e: Exception) { Log.w(TAG, "mixdown stopped", e) }
+            try {
+                pipeOut.use { MixExport.write(store, job, names, g, format, context.cacheDir, it) { !pipeIn.closed } }
+            } catch (e: Exception) {
+                Log.w(TAG, "mixdown stopped", e)
+            }
         }
-        return newFixedLengthResponse(status(200, "OK"), "audio/wav", pipeIn, length).apply {
-            addHeader("Content-Disposition", "attachment; filename=\"${safeFileName(job.title)} (mix).wav\"")
+        return newChunkedResponse(status(200, "OK"), MixExport.mimeType(format), pipeIn).apply {
+            addHeader("Content-Disposition", "attachment; filename=\"${safeFileName(job.title)} (mix).$format\"")
         }
     }
 
