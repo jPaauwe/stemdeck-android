@@ -6,46 +6,69 @@
 #include <Eigen/Dense>
 #include <unsupported/Eigen/CXX11/Tensor>
 
+// StemDeck Android: the norms, glu and layer scale below are rewritten as
+// straight passes over the column-major data (index i + F*(c + C*w)), with
+// the per-element divide folded into one multiply-add. Same maths as
+// upstream (two-pass mean and unbiased variance), different rounding only.
 Eigen::Tensor3dXf demucscpp::group_norm(const Eigen::Tensor3dXf &x,
                                         const Eigen::Tensor1dXf &weight,
                                         const Eigen::Tensor1dXf &b,
                                         int num_groups, float eps)
 {
     SD_PROF("group norm");
-    int freq = x.dimension(0);
-    int channels = x.dimension(1);
-    int width = x.dimension(2);
+    const int F = x.dimension(0);
+    const int C = x.dimension(1);
+    const int W = x.dimension(2);
+    const int G = num_groups;
+    const int gs = C / G;
+    const float *xp = x.data();
 
-    Eigen::Tensor3dXf y_out(freq, channels, width);
-    y_out.setZero();
-
-    int group_size = channels / num_groups;
-
-    for (int i = 0; i < freq; ++i)
-    {
-        for (int g = 0; g < num_groups; ++g)
+    // mean per (i, g)
+    std::vector<double> mean(size_t(F) * G, 0.0), var(size_t(F) * G, 0.0);
+    for (int w = 0; w < W; ++w)
+        for (int c = 0; c < C; ++c)
         {
-            int start = g * group_size;
-            int end = (g + 1) * group_size;
-
-            Eigen::Tensor3dXf slice =
-                x.slice(Eigen::array<int, 3>{i, start, 0},
-                        Eigen::array<int, 3>{1, group_size, width});
-            Eigen::Tensor<float, 0> mean_tensor = slice.mean();
-            float mean = mean_tensor(0);
-            float var = demucscpp::calculate_variance(slice, mean);
-
-            for (int c = start; c < end; ++c)
+            const float *col = xp + size_t(F) * (c + size_t(C) * w);
+            double *m = mean.data() + size_t(F) * (c / gs);
+            for (int i = 0; i < F; ++i)
+                m[i] += col[i];
+        }
+    const double n = double(gs) * W;
+    for (double &m : mean)
+        m /= n;
+    for (int w = 0; w < W; ++w)
+        for (int c = 0; c < C; ++c)
+        {
+            const float *col = xp + size_t(F) * (c + size_t(C) * w);
+            const double *m = mean.data() + size_t(F) * (c / gs);
+            double *v = var.data() + size_t(F) * (c / gs);
+            for (int i = 0; i < F; ++i)
             {
-                for (int w = 0; w < width; ++w)
-                {
-                    float norm_val = (x(i, c, w) - mean) / std::sqrt(var + eps);
-                    y_out(i, c, w) = norm_val * weight(c) + b(c);
-                }
+                const double d = col[i] - m[i];
+                v[i] += d * d;
             }
         }
+    std::vector<float> inv(size_t(F) * G), mf(size_t(F) * G);
+    for (size_t k = 0; k < inv.size(); ++k)
+    {
+        inv[k] = float(1.0 / std::sqrt(var[k] / (n - 1) + eps));
+        mf[k] = float(mean[k]);
     }
 
+    Eigen::Tensor3dXf y_out(F, C, W);
+    float *yp = y_out.data();
+    for (int w = 0; w < W; ++w)
+        for (int c = 0; c < C; ++c)
+        {
+            const size_t off = size_t(F) * (c + size_t(C) * w);
+            const float *col = xp + off;
+            float *out = yp + off;
+            const float *iv = inv.data() + size_t(F) * (c / gs);
+            const float *m = mf.data() + size_t(F) * (c / gs);
+            const float wc = weight(c), bc = b(c);
+            for (int i = 0; i < F; ++i)
+                out[i] = (col[i] - m[i]) * (iv[i] * wc) + bc;
+        }
     return y_out;
 }
 
@@ -55,44 +78,15 @@ demucscpp::group_norm_fused_gelu(const Eigen::Tensor3dXf &x,
                                  const Eigen::Tensor1dXf &bias, float eps)
 {
     SD_PROF("group norm + gelu");
-    int freq = x.dimension(0);
-    int channels = x.dimension(1);
-    int width = x.dimension(2);
-
-    Eigen::Tensor3dXf y_out(freq, channels, width);
-    y_out.setZero();
-
-    // Normalizing over the entire channel since num_groups is always 1
-    for (int i = 0; i < freq; ++i)
+    Eigen::Tensor3dXf y = demucscpp::group_norm(x, weight, bias, 1, eps);
+    float *p = y.data();
+    const size_t n = size_t(y.size());
+    for (size_t k = 0; k < n; ++k)
     {
-        // Calculate mean and variance for the entire channel
-        Eigen::Tensor2dXf slice = x.chip<0>(i);
-        Eigen::Tensor<float, 0> mean_tensor = slice.mean();
-        float mean = mean_tensor(0);
-        float var = demucscpp::calculate_variance(slice, mean);
-
-        for (int c = 0; c < channels; ++c)
-        {
-            for (int w = 0; w < width; ++w)
-            {
-                // Normalize
-                float norm_val = (x(i, c, w) - mean) / std::sqrt(var + eps);
-
-                // Apply GroupNorm weight and bias
-                norm_val = norm_val * weight(c) + bias(c);
-
-                // Apply GeLU activation
-                float activated_val =
-                    0.5f * norm_val *
-                    (1.0f + std::erf(norm_val / std::sqrt(2.0f)));
-
-                // Assign the activated value back to the tensor
-                y_out(i, c, w) = activated_val;
-            }
-        }
+        const float v = p[k];
+        p[k] = 0.5f * v * (1.0f + std::erf(v * 0.70710678118654752f));
     }
-
-    return y_out;
+    return y;
 }
 
 Eigen::Tensor3dXf demucscpp::glu(const Eigen::Tensor3dXf &x, const int dim)
@@ -104,21 +98,46 @@ Eigen::Tensor3dXf demucscpp::glu(const Eigen::Tensor3dXf &x, const int dim)
                   << std::endl;
         std::exit(1);
     }
+    const int F = x.dimension(0), C = x.dimension(1), W = x.dimension(2);
+    Eigen::array<Eigen::Index, 3> dims = {F, C, W};
+    dims[dim] /= 2;
+    Eigen::Tensor3dXf y(dims);
+    const float *xp = x.data();
+    float *yp = y.data();
 
-    int split_size = x.dimension(dim) / 2;
-
-    Eigen::array<int, 3> start_indices = {0, 0, 0};
-    Eigen::array<int, 3> sizes = {(int)x.dimension(0), (int)x.dimension(1),
-                                  (int)x.dimension(2)};
-    start_indices[dim] = split_size;
-    sizes[dim] = split_size;
-
-    auto first_half = x.slice(Eigen::array<int, 3>({0, 0, 0}), sizes);
-    auto second_half = x.slice(start_indices, sizes);
-    auto sigmoid_second_half = second_half.unaryExpr(
-        [](float v) { return 1.0f / (1.0f + std::exp(-v)); });
-
-    return first_half * sigmoid_second_half;
+    // Each output run of `len` floats takes `a` from the first half and
+    // the gate from `b` = a + half.
+    auto run = [](const float *a, const float *g, float *o, Eigen::Index len) {
+        Eigen::Map<const Eigen::ArrayXf> A(a, len), G(g, len);
+        Eigen::Map<Eigen::ArrayXf> O(o, len);
+        O = A / (1.0f + (-G).exp());
+    };
+    if (dim == 0)
+    {
+        const int h = F / 2;
+        for (int w = 0; w < W; ++w)
+            for (int c = 0; c < C; ++c)
+            {
+                const float *col = xp + size_t(F) * (c + size_t(C) * w);
+                run(col, col + h, yp + size_t(h) * (c + size_t(C) * w), h);
+            }
+    }
+    else if (dim == 1)
+    {
+        const int h = C / 2;
+        for (int w = 0; w < W; ++w)
+        {
+            const float *blk = xp + size_t(F) * C * w;
+            run(blk, blk + size_t(F) * h, yp + size_t(F) * h * w, Eigen::Index(F) * h);
+        }
+    }
+    else
+    {
+        const int h = W / 2;
+        const Eigen::Index plane = Eigen::Index(F) * C;
+        run(xp, xp + plane * h, yp, plane * h);
+    }
+    return y;
 }
 
 Eigen::Tensor3dXf demucscpp::layer_norm(const Eigen::Tensor3dXf &x,
@@ -446,48 +465,42 @@ void demucscpp::common_encoder_layer(
     SD_PROF_END(qkv);
 
     SD_PROF_BEGIN(heads, "attention: scores + softmax + weighted sum");
-    int head_split = C / num_heads;
-
-    // map matrices to tensors
-    Eigen::Tensor3dXf Q_heads =
-        Eigen::TensorMap<Eigen::Tensor3dXf>(Q.data(), T, head_split, num_heads);
-    Eigen::Tensor3dXf K_heads =
-        Eigen::TensorMap<Eigen::Tensor3dXf>(K.data(), S, head_split, num_heads);
-    Eigen::Tensor3dXf V_heads =
-        Eigen::TensorMap<Eigen::Tensor3dXf>(V.data(), S, head_split, num_heads);
-
+    // StemDeck Android: per-head attention without copies. Q, K and V are
+    // column-major (rows = tokens), so head h is the contiguous column block
+    // [h*hd, (h+1)*hd). Queries are processed in blocks: the scores for a
+    // block are computed transposed (keys x queries), so each query's
+    // softmax runs down one contiguous column, and the block stays in cache.
+    // Same maths as upstream (max-subtracted softmax), different rounding.
+    const int head_split = C / num_heads;
+    const float scale = 1.0f / std::sqrt((float)head_split);
     Eigen::MatrixXf cross_attn_out(T, C);
-
-    for (int h = 0; h < num_heads; ++h)
     {
-        // Extract the h-th head from Q_heads and K_heads
-        Eigen::Tensor2dXf Q_head_tensor = Q_heads.chip(h, 2);
-        Eigen::Tensor2dXf K_head_tensor = K_heads.chip(h, 2);
-        Eigen::Tensor2dXf V_head_tensor = V_heads.chip(h, 2);
-
-        // Reshape the tensors to matrices
-        Eigen::Map<Eigen::MatrixXf> Q_head(Q_head_tensor.data(), T, head_split);
-        Eigen::Map<Eigen::MatrixXf> K_head(K_head_tensor.data(), S, head_split);
-        Eigen::Map<Eigen::MatrixXf> V_head(V_head_tensor.data(), S, head_split);
-
-        // Compute the dot product of Q_head and K_head
-        Eigen::MatrixXf dot_product =
-            Q_head * K_head.transpose() / std::sqrt((float)head_split);
-
-        // Apply softmax to the dot product
-        Eigen::ArrayXf max_vals = dot_product.rowwise().maxCoeff();
-        Eigen::MatrixXf max_vals_expanded = max_vals.replicate(1, S);
-        Eigen::MatrixXf softmax_scores =
-            (dot_product - max_vals_expanded).array().exp().matrix();
-        Eigen::VectorXf row_sums = softmax_scores.rowwise().sum();
-        Eigen::MatrixXf divisor = row_sums.replicate(1, S);
-        softmax_scores = (softmax_scores.array() / divisor.array()).matrix();
-
-        Eigen::MatrixXf cross_attn_head = softmax_scores * V_head;
-        cross_attn_out.block(0, h * head_split, T, head_split) =
-            cross_attn_head;
+        constexpr int kBlock = 128;
+        Eigen::MatrixXf scores(S, kBlock);
+        Eigen::MatrixXf Qs = Q * scale;
+        for (int h = 0; h < num_heads; ++h)
+        {
+            const Eigen::Index off = Eigen::Index(h) * head_split;
+            Eigen::Map<const Eigen::MatrixXf> Qh(Qs.data() + off * T, T, head_split);
+            Eigen::Map<const Eigen::MatrixXf> Kh(K.data() + off * S, S, head_split);
+            Eigen::Map<const Eigen::MatrixXf> Vh(V.data() + off * S, S, head_split);
+            for (int q0 = 0; q0 < T; q0 += kBlock)
+            {
+                const int nb = std::min(kBlock, T - q0);
+                auto sc = scores.leftCols(nb);
+                sc.noalias() = Kh * Qh.middleRows(q0, nb).transpose();
+                for (int j = 0; j < nb; ++j)
+                {
+                    auto col = sc.col(j).array();
+                    const float mx = col.maxCoeff();
+                    col = (col - mx).exp();
+                    col *= 1.0f / col.sum();
+                }
+                cross_attn_out.block(q0, off, nb, head_split).noalias() =
+                    sc.transpose() * Vh;
+            }
+        }
     }
-
     SD_PROF_END(heads);
 
     // Copy q into q_2d (Map q to 2D matrix)

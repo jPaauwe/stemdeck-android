@@ -7,6 +7,8 @@
 #include "sdprof.hpp"
 #include <cmath>
 #include <iostream>
+#include <vector>
+#include <algorithm>
 #include <unsupported/Eigen/CXX11/Tensor>
 
 namespace demucscpp
@@ -79,12 +81,12 @@ inline Eigen::MatrixXf im2col(const Eigen::Tensor3dXf &input)
 template <int in_channels, int out_channels, int kernel_height,
           int kernel_width, int pad_height, int pad_width, int dilation_height,
           int dilation_width>
-Eigen::Tensor3dXf conv2d_stride1_taps(const Eigen::Tensor3dXf &x,
+Eigen::Tensor3dXf conv2d_stride1_scatter(const Eigen::Tensor3dXf &x,
                                       const Eigen::Tensor4dXf &w,
                                       const Eigen::Tensor1dXf &b,
                                       int out_height, int out_width)
 {
-    SD_PROF("conv stride 1 (per-tap GEMM)");
+    SD_PROF("conv stride 1 (per-tap scatter, fallback)");
     const int in_height = x.dimension(1);
     const int in_width = x.dimension(2);
     Eigen::Map<const Eigen::MatrixXf> X(x.data(), in_channels,
@@ -129,6 +131,99 @@ Eigen::Tensor3dXf conv2d_stride1_taps(const Eigen::Tensor3dXf &x,
                         dst[o] += src[o];
                 }
             }
+        }
+    }
+    return y_out;
+}
+
+// StemDeck Android: stride-1 convolution as one GEMM per kernel tap on the
+// flattened (h, w) positions, accumulating straight into the output.
+//
+// With "same" padding (out_height == in_height), tap (kh, kw) reads input
+// position p + delta for output position p, delta = dh + H*dw. One GEMM
+// over all output positions whose w is valid covers the tap, except the
+// few rows whose h + dh falls outside [0, H): there the flat index wraps
+// into the neighbouring column, so those columns are gathered and their
+// contribution subtracted again.
+template <int in_channels, int out_channels, int kernel_height,
+          int kernel_width, int pad_height, int pad_width, int dilation_height,
+          int dilation_width>
+Eigen::Tensor3dXf conv2d_stride1_taps(const Eigen::Tensor3dXf &x,
+                                      const Eigen::Tensor4dXf &w,
+                                      const Eigen::Tensor1dXf &b,
+                                      int out_height, int out_width)
+{
+    const int H = x.dimension(1);
+    const int W = x.dimension(2);
+    if (out_height != H)
+    {
+        return conv2d_stride1_scatter<in_channels, out_channels, kernel_height,
+                                      kernel_width, pad_height, pad_width,
+                                      dilation_height, dilation_width>(
+            x, w, b, out_height, out_width);
+    }
+    SD_PROF("conv stride 1 (per-tap GEMM)");
+    const int OW = out_width;
+    const Eigen::Index P = Eigen::Index(H) * W;
+    const Eigen::Index OP = Eigen::Index(H) * OW;
+
+    Eigen::Map<const Eigen::MatrixXf> X(x.data(), in_channels, P);
+    Eigen::Tensor3dXf y_out(out_channels, H, OW);
+    Eigen::Map<Eigen::MatrixXf> Y(y_out.data(), out_channels, OP);
+    Eigen::Map<const Eigen::VectorXf> bias(b.data(), out_channels);
+    Y.colwise() = bias;
+
+    Eigen::MatrixXf Wk(out_channels, in_channels);
+    Eigen::MatrixXf G, GW;
+    std::vector<Eigen::Index> fix;
+    for (int kh = 0; kh < kernel_height; ++kh)
+    {
+        for (int kw = 0; kw < kernel_width; ++kw)
+        {
+            const int dh = kh * dilation_height - pad_height;
+            const int dw = kw * dilation_width - pad_width;
+            const int ow_lo = std::max(0, -dw);
+            const int ow_hi = std::min(OW, W - dw);
+            if (ow_lo >= ow_hi || std::abs(dh) >= H)
+                continue;
+            for (int o = 0; o < out_channels; ++o)
+                for (int c = 0; c < in_channels; ++c)
+                    Wk(o, c) = w(o, c, kh, kw);
+
+            const Eigen::Index delta = dh + Eigen::Index(H) * dw;
+            Eigen::Index p_lo = Eigen::Index(ow_lo) * H;
+            Eigen::Index p_hi = Eigen::Index(ow_hi) * H;
+            // keep the input index inside the array
+            p_lo = std::max(p_lo, -delta);
+            p_hi = std::min(p_hi, P - delta);
+            if (p_lo >= p_hi)
+                continue;
+            Y.middleCols(p_lo, p_hi - p_lo).noalias() +=
+                Wk * X.middleCols(p_lo + delta, p_hi - p_lo);
+
+            if (dh == 0)
+                continue;
+            // rows whose h + dh is outside [0, H) took a wrapped input
+            fix.clear();
+            for (int ow = ow_lo; ow < ow_hi; ++ow)
+            {
+                const int r0 = dh < 0 ? 0 : H - dh;
+                const int r1 = dh < 0 ? -dh : H;
+                for (int r = r0; r < r1; ++r)
+                {
+                    const Eigen::Index p = r + Eigen::Index(H) * ow;
+                    if (p >= p_lo && p < p_hi)
+                        fix.push_back(p);
+                }
+            }
+            if (fix.empty())
+                continue;
+            G.resize(in_channels, Eigen::Index(fix.size()));
+            for (size_t f = 0; f < fix.size(); ++f)
+                G.col(f) = X.col(fix[f] + delta);
+            GW.noalias() = Wk * G;
+            for (size_t f = 0; f < fix.size(); ++f)
+                Y.col(fix[f]) -= GW.col(f);
         }
     }
     return y_out;

@@ -220,7 +220,7 @@ std::string compare_outputs(const std::string &a, const std::string &b)
     const auto va = read(a), vb = read(b);
     if (va.empty() || va.size() != vb.size() || va.size() % 6 != 0)
         return "{\"error\": \"outputs missing or of different size\"}";
-    const size_t per = va.size() / 6;
+    const size_t per = va.size() / 6; // samples x channels per source
     std::ostringstream o;
     o.setf(std::ios::fixed);
     o.precision(1);
@@ -231,7 +231,7 @@ std::string compare_outputs(const std::string &a, const std::string &b)
     for (int s = 0; s < 6; ++s)
     {
         double sig = 0, err = 0;
-        for (size_t k = 0; k < 2 * per; ++k)
+        for (size_t k = 0; k < per; ++k)
         {
             const size_t i = size_t(s) + 6 * k;
             const double d = double(vb[i]) - va[i];

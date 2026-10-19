@@ -7,6 +7,7 @@
 #include <Eigen/Dense>
 #include "sdprof.hpp"
 #include <iostream>
+#include <vector>
 #include <unsupported/Eigen/CXX11/Tensor>
 
 namespace demucscpp
@@ -68,11 +69,18 @@ inline Eigen::Tensor3dXf layer_scale(const Eigen::Tensor3dXf &x,
                                      const Eigen::Tensor1dXf &scale_weights)
 {
     SD_PROF("layer scale");
-    Eigen::Tensor3dXf y_out(x.dimensions());
-    for (int i = 0; i < x.dimension(1); ++i)
-    {
-        y_out.chip<1>(i) = x.chip<1>(i) * scale_weights(i);
-    }
+    const int F = x.dimension(0), C = x.dimension(1), W = x.dimension(2);
+    Eigen::Tensor3dXf y_out(F, C, W);
+    const float *xp = x.data();
+    float *yp = y_out.data();
+    for (int w = 0; w < W; ++w)
+        for (int c = 0; c < C; ++c)
+        {
+            const size_t off = size_t(F) * (c + size_t(C) * w);
+            const float s = scale_weights(c);
+            for (int i = 0; i < F; ++i)
+                yp[off + i] = xp[off + i] * s;
+        }
     return y_out;
 }
 
