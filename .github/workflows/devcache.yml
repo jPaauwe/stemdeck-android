@@ -1,0 +1,111 @@
+name: Dev cache
+
+# Development only: fetches what the sandbox used to port the analysis
+# features cannot download itself (Python wheels for the upstream reference
+# implementations, model checkpoints) and puts them in the "dev-cache"
+# pre-release. Not part of the app.
+on:
+  push:
+    branches: ['dev/cache']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cache:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Upstream StemDeck at the ported commit
+        run: |
+          git clone -q https://github.com/stemdeckapp/stemdeck upstream
+          git -C upstream checkout -q 5f9405ca68ac31b31ae07ac416141d4d1f7b5f3a
+      - name: Wheels for the reference environment (Python 3.13, CPU torch)
+        run: |
+          pip install -q uv
+          cd upstream
+          uv export --frozen --no-dev --no-hashes --no-emit-project --python 3.13 -o ../reqs-all.txt
+          cd ..
+          grep -v -E '^(torch|torchaudio|triton|nvidia-)' reqs-all.txt > reqs.txt
+          cat >> reqs.txt <<'R'
+          torch==2.6.0+cpu
+          torchaudio==2.6.0+cpu
+          pytest
+          pytest-asyncio
+          httpx
+          onnx
+          onnxscript
+          R
+          mkdir -p wheels
+          pip wheel -q -w wheels --extra-index-url https://download.pytorch.org/whl/cpu -r reqs.txt 2>&1 | tail -20
+          ls wheels | wc -l; du -sh wheels
+          cp reqs.txt wheels/requirements.txt
+      - name: Model files
+        run: |
+          set -x
+          mkdir -p models && cd models
+          get() { curl -fsSL --retry 3 -o "$1" "$2" || echo "FAILED $1 $2" >> failed.txt; }
+          get beat_this-final0.ckpt https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/final0.ckpt
+          get beat_this-small0.ckpt https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/small0.ckpt
+          for f in harmonix-fold0-0vra4ys2 harmonix-fold1-3ozjhtsj harmonix-fold2-gmgo0nsy harmonix-fold3-i92b7m8p \
+                   harmonix-fold4-1bql5qo0 harmonix-fold5-x4z5zeef harmonix-fold6-x7t226rq harmonix-fold7-qwwskhg6; do
+            get "$f.pth" "https://huggingface.co/taejunkim/allinone/resolve/main/$f.pth"
+          done
+          for repo in ashudesai/songbird-models musetric/beat-this-onnx azstorm/lightcut-music-analysis-models taejunkim/allinone; do
+            n=$(echo "$repo" | tr / _)
+            curl -fsSL "https://huggingface.co/api/models/$repo" -o "hf-$n.json" || true
+            curl -fsSL "https://huggingface.co/api/models/$repo/tree/main?recursive=true" -o "hf-$n-tree.json" || true
+          done
+          python3 - <<'PY'
+          import json, os, subprocess
+          want = {
+            "musetric_beat-this-onnx": lambda p: p.endswith((".json", ".bin", ".md")) or "final0" in p,
+            "ashudesai_songbird-models": lambda p: ("beat" in p.lower() or p.endswith((".json", ".md"))),
+            "azstorm_lightcut-music-analysis-models": lambda p: True,
+          }
+          for n, keep in want.items():
+              try:
+                  tree = json.load(open(f"hf-{n}-tree.json"))
+              except Exception as e:
+                  print("no tree", n, e); continue
+              repo = n.replace("_", "/", 1)
+              for e in tree:
+                  if e.get("type") != "file" or not keep(e["path"]): continue
+                  if e.get("size", 0) > 400_000_000: continue
+                  out = f"{n}__" + e["path"].replace("/", "__")
+                  url = f"https://huggingface.co/{repo}/resolve/main/{e['path']}"
+                  r = subprocess.run(["curl", "-fsSL", "--retry", "3", "-o", out, url])
+                  print(r.returncode, out, e.get("size"))
+          PY
+          ls -la; cat failed.txt 2>/dev/null || true
+      - name: Test audio (CC-licensed librosa examples)
+        run: |
+          mkdir -p audio && cd audio
+          for f in "Kevin_MacLeod_-_Vibe_Ace" "admiralbob77_-_Choice_-_Drum-bass" \
+                   "Kevin_MacLeod_-_P_I_Tchaikovsky_Dance_of_the_Sugar_Plum_Fairy" \
+                   "Hungarian_Dance_number_5_-_Allegro_in_F_sharp_minor_(string_orchestra)" \
+                   "Karissa_Hobbs_-_Lets_Go_Fishin" "147793__setuniman__sweet-waltz-0i-22mi" \
+                   "442789__lena-orsa__happy-music-pistachio-ice-cream-ragtime" "snare-accelerate" \
+                   "drese-midi" "drese-tempo"; do
+            for ext in hq.ogg txt; do
+              q=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$f.$ext")
+              curl -fsSL --retry 3 -o "$f.$ext" "https://librosa.org/data/audio/$q" || echo "FAILED $f.$ext"
+            done
+          done
+          ls -la
+      - name: Publish to the dev-cache pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -cf wheels.tar wheels
+          split -b 1500m -d wheels.tar wheels.tar.part
+          tar -cf models.tar models
+          tar -cf audio.tar audio
+          gh release view dev-cache --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create dev-cache --repo "${{ github.repository }}" --prerelease \
+              --title "Development cache (not an app release)" \
+              --notes "Reference wheels, model checkpoints and CC-licensed test audio used to port and test the analysis features. Not an app release; safe to delete."
+          gh release upload dev-cache wheels.tar.part* models.tar audio.tar --clobber --repo "${{ github.repository }}"
