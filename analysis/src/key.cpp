@@ -73,7 +73,9 @@ double tonic_fit(int root, bool major, const std::vector<Edge>& edges) {
 KeyResult detect_key(const std::vector<double>& chroma_mean, const std::vector<Edge>& edges) {
     auto cands = key_candidates(chroma_mean);
     const Cand best = cands[0];
-    auto [rr, rm] = relative(best.root, best.major);
+    const auto rel_key = relative(best.root, best.major);
+    const int rr = rel_key.first;
+    const bool rm = rel_key.second;
     Cand rel = *std::find_if(cands.begin(), cands.end(), [&](const Cand& c) { return c.root == rr && c.major == rm; });
     Cand winner = best;
     double clarity = 1.0;

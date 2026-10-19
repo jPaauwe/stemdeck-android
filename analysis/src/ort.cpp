@@ -150,11 +150,11 @@ std::vector<OrtTensor> OrtModel::run_named(const std::vector<std::string>& names
             OrtTensorTypeAndShapeInfo* info = nullptr;
             check(a->GetTensorTypeAndShape(v, &info));
             size_t dims = 0, count = 0;
-            a->GetDimensionsCount(info, &dims);
+            check(a->GetDimensionsCount(info, &dims));
             OrtTensor t;
             t.shape.resize(dims);
-            a->GetDimensions(info, t.shape.data(), dims);
-            a->GetTensorShapeElementCount(info, &count);
+            check(a->GetDimensions(info, t.shape.data(), dims));
+            check(a->GetTensorShapeElementCount(info, &count));
             a->ReleaseTensorTypeAndShapeInfo(info);
             float* p = nullptr;
             check(a->GetTensorMutableData(v, (void**)&p));
