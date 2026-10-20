@@ -11,7 +11,8 @@ FetchContent_Declare(quickjs
 )
 set(QJS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(quickjs)
-# 16 KB pages (Android 15+): every LOAD segment aligned to 16 KB.
-target_link_options(qjs_exe PRIVATE -Wl,-z,max-page-size=16384)
-set_target_properties(qjs_exe PROPERTIES OUTPUT_NAME "libqjs.so" SUFFIX "")
-install(TARGETS qjs_exe RUNTIME DESTINATION .)
+# 16 KB pages (Android 15+): every LOAD segment aligned to 16 KB; stripped.
+target_link_options(qjs_exe PRIVATE -Wl,-z,max-page-size=16384 -s)
+# Written to <build>/out/libqjs.so, which the app's Gradle task copies.
+set_target_properties(qjs_exe PROPERTIES OUTPUT_NAME "libqjs.so" SUFFIX ""
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out")

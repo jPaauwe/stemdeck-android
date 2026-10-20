@@ -118,8 +118,14 @@ val buildQuickJs by tasks.registering {
     outputs.dir(qjsOut)
     doLast {
         val sdk = android.sdkDirectory
-        val cmake = File(sdk, "cmake/3.22.1/bin/cmake")
+        // The SDK's CMake if it is installed (Android Studio installs it on
+        // first sync; Gradle only fetches it later in a build), else the one
+        // on PATH.
+        val sdkCmake = File(sdk, "cmake/3.22.1/bin/cmake")
+        val cmake = if (sdkCmake.exists()) sdkCmake else File("cmake")
         val ninja = File(sdk, "cmake/3.22.1/bin/ninja")
+        val generator = if (ninja.exists()) listOf("-G", "Ninja", "-DCMAKE_MAKE_PROGRAM=${ninja.path}")
+            else listOf("-G", "Unix Makefiles")
         val toolchain = File(android.ndkDirectory, "build/cmake/android.toolchain.cmake")
         fun run(vararg cmd: String) {
             val p = ProcessBuilder(*cmd).inheritIO().start()
@@ -127,11 +133,11 @@ val buildQuickJs by tasks.registering {
         }
         for (abi in qjsAbis) {
             val build = layout.buildDirectory.dir("qjs/build-$abi").get().asFile
-            run(cmake.path, "-S", file("src/main/qjs").path, "-B", build.path, "-G", "Ninja",
-                "-DCMAKE_MAKE_PROGRAM=${ninja.path}", "-DCMAKE_TOOLCHAIN_FILE=${toolchain.path}",
+            run(cmake.path, "-S", file("src/main/qjs").path, "-B", build.path, *generator.toTypedArray(),
+                "-DCMAKE_TOOLCHAIN_FILE=${toolchain.path}",
                 "-DANDROID_ABI=$abi", "-DANDROID_PLATFORM=android-29", "-DCMAKE_BUILD_TYPE=Release")
             run(cmake.path, "--build", build.path, "--target", "qjs_exe")
-            run(cmake.path, "--install", build.path, "--strip", "--prefix", qjsOut.get().dir(abi).asFile.path)
+            File(build, "out/libqjs.so").copyTo(qjsOut.get().dir(abi).file("libqjs.so").asFile, overwrite = true)
         }
     }
 }
