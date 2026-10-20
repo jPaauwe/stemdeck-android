@@ -1,0 +1,307 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :app
+Checking the license for package NDK (Side by side) 27.2.12479018 in /usr/local/lib/android/sdk/licenses
+License for package NDK (Side by side) 27.2.12479018 accepted.
+Preparing "Install NDK (Side by side) 27.2.12479018 v.27.2.12479018".
+"Install NDK (Side by side) 27.2.12479018 v.27.2.12479018" ready.
+Installing NDK (Side by side) 27.2.12479018 in /usr/local/lib/android/sdk/ndk/27.2.12479018
+"Install NDK (Side by side) 27.2.12479018 v.27.2.12479018" complete.
+"Install NDK (Side by side) 27.2.12479018 v.27.2.12479018" finished.
+
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:buildQuickJs
+> Task :app:preBuild
+> Task :app:preArm64ReleaseBuild
+> Task :app:generateArm64ReleaseBuildConfig
+> Task :app:extractArm64ReleasePythonBuildPackages
+
+> Task :app:installArm64ReleasePythonRequirements
+Chaquopy: Installing for arm64-v8a
+Looking in indexes: https://pypi.org/simple, https://chaquo.com/pypi-13.1
+Collecting yt-dlp==2026.8.19
+  Downloading yt_dlp-2026.8.19-py3-none-any.whl.metadata (183 kB)
+Collecting yt-dlp-ejs==0.8.0
+  Downloading yt_dlp_ejs-0.8.0-py3-none-any.whl.metadata (3.5 kB)
+Collecting certifi
+  Downloading certifi-2026.10.19-py3-none-any.whl.metadata (2.5 kB)
+Downloading yt_dlp-2026.8.19-py3-none-any.whl (3.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.2/3.2 MB 32.7 MB/s  0:00:00
+Downloading yt_dlp_ejs-0.8.0-py3-none-any.whl (53 kB)
+Downloading certifi-2026.10.19-py3-none-any.whl (136 kB)
+Installing collected packages: yt-dlp-ejs, yt-dlp, certifi
+
+Successfully installed certifi-2026.10.19 yt-dlp-2026.8.19 yt-dlp-ejs-0.8.0
+
+> Task :app:mergeArm64ReleasePythonSources
+> Task :app:generateArm64ReleasePythonProxies
+> Task :app:generateArm64ReleaseResValues
+> Task :app:checkArm64ReleaseAarMetadata
+> Task :app:mapArm64ReleaseSourceSetPaths
+> Task :app:generateArm64ReleaseResources
+> Task :app:packageArm64ReleaseResources
+> Task :app:mergeArm64ReleaseResources
+> Task :app:createArm64ReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksArm64Release
+> Task :app:parseArm64ReleaseLocalResources
+> Task :app:processArm64ReleaseMainManifest
+> Task :app:processArm64ReleaseManifest
+> Task :app:preArm64ReleaseUnitTestBuild
+> Task :app:javaPreCompileArm64Release
+> Task :app:javaPreCompileArm64ReleaseUnitTest
+
+> Task :app:configureCMakeRelease[arm64-v8a]
+Checking the license for package CMake 3.22.1 in /usr/local/lib/android/sdk/licenses
+License for package CMake 3.22.1 accepted.
+Preparing "Install CMake 3.22.1 v.3.22.1".
+"Install CMake 3.22.1 v.3.22.1" ready.
+Installing CMake 3.22.1 in /usr/local/lib/android/sdk/cmake/3.22.1
+"Install CMake 3.22.1 v.3.22.1" complete.
+"Install CMake 3.22.1 v.3.22.1" finished.
+
+> Task :app:processArm64ReleaseManifestForPackage
+> Task :app:buildCMakeRelease[arm64-v8a]
+> Task :app:generateArm64ReleasePythonJniLibs
+> Task :app:mergeArm64ReleaseJniLibFolders
+> Task :app:mergeArm64ReleaseArtProfile
+> Task :app:mergeArm64ReleaseNativeLibs
+> Task :app:checkArm64ReleaseDuplicateClasses
+> Task :app:stripArm64ReleaseDebugSymbols
+> Task :app:mergeArm64ReleaseStartupProfile
+> Task :app:mergeArm64ReleaseShaders
+> Task :app:compileArm64ReleaseShaders NO-SOURCE
+> Task :app:generateArm64ReleaseAssets UP-TO-DATE
+> Task :app:processArm64ReleaseResources
+> Task :app:desugarArm64ReleaseFileDependencies
+> Task :app:extractArm64ReleaseNativeSymbolTables
+> Task :app:generateArm64ReleasePythonMiscAssets
+> Task :app:mergeArm64ReleaseNativeDebugMetadata
+> Task :app:compileArm64ReleaseKotlin
+> Task :app:generateArm64ReleasePythonRequirementsAssets
+> Task :app:generateArm64ReleasePythonSourceAssets
+> Task :app:generateArm64ReleasePythonBuildAssets
+> Task :app:mergeArm64ReleaseAssets
+> Task :app:extractArm64ReleaseVersionControlInfo
+> Task :app:optimizeArm64ReleaseResources
+> Task :app:compressArm64ReleaseAssets
+> Task :app:mergeExtDexArm64Release
+> Task :app:collectArm64ReleaseDependencies
+> Task :app:sdkArm64ReleaseDependencyData
+> Task :app:validateSigningArm64Release
+> Task :app:writeArm64ReleaseAppMetadata
+> Task :app:writeArm64ReleaseSigningConfigVersions
+> Task :app:preX86_64ReleaseBuild
+> Task :app:configureCMakeRelease[x86_64]
+> Task :app:buildCMakeRelease[x86_64]
+> Task :app:compileArm64ReleaseJavaWithJavac
+> Task :app:bundleArm64ReleaseClassesToCompileJar
+> Task :app:bundleArm64ReleaseClassesToRuntimeJar
+> Task :app:processArm64ReleaseJavaRes
+> Task :app:compileArm64ReleaseUnitTestKotlin
+> Task :app:dexBuilderArm64Release
+> Task :app:compileArm64ReleaseUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processArm64ReleaseUnitTestJavaRes
+> Task :app:testArm64ReleaseUnitTest
+> Task :app:mergeArm64ReleaseGlobalSynthetics
+> Task :app:mergeArm64ReleaseJavaResource
+> Task :app:generateX86_64ReleasePythonJniLibs
+> Task :app:mergeX86_64ReleaseJniLibFolders
+> Task :app:generateX86_64ReleaseBuildConfig
+> Task :app:checkX86_64ReleaseDuplicateClasses
+> Task :app:mergeDexArm64Release
+> Task :app:mergeX86_64ReleaseNativeLibs
+> Task :app:extractX86_64ReleasePythonBuildPackages
+> Task :app:compileArm64ReleaseArtProfile
+> Task :app:stripX86_64ReleaseDebugSymbols
+
+> Task :app:installX86_64ReleasePythonRequirements
+Chaquopy: Installing for x86_64
+Looking in indexes: https://pypi.org/simple, https://chaquo.com/pypi-13.1
+Collecting yt-dlp==2026.8.19
+  Using cached yt_dlp-2026.8.19-py3-none-any.whl.metadata (183 kB)
+Collecting yt-dlp-ejs==0.8.0
+  Using cached yt_dlp_ejs-0.8.0-py3-none-any.whl.metadata (3.5 kB)
+Collecting certifi
+  Using cached certifi-2026.10.19-py3-none-any.whl.metadata (2.5 kB)
+Using cached yt_dlp-2026.8.19-py3-none-any.whl (3.2 MB)
+Using cached yt_dlp_ejs-0.8.0-py3-none-any.whl (53 kB)
+Using cached certifi-2026.10.19-py3-none-any.whl (136 kB)
+Installing collected packages: yt-dlp-ejs, yt-dlp, certifi
+
+Successfully installed certifi-2026.10.19 yt-dlp-2026.8.19 yt-dlp-ejs-0.8.0
+
+> Task :app:mergeX86_64ReleasePythonSources
+> Task :app:generateX86_64ReleasePythonProxies
+> Task :app:checkX86_64ReleaseAarMetadata
+> Task :app:generateX86_64ReleaseResValues
+> Task :app:mapX86_64ReleaseSourceSetPaths
+> Task :app:generateX86_64ReleaseResources
+> Task :app:packageX86_64ReleaseResources
+> Task :app:parseX86_64ReleaseLocalResources
+> Task :app:createX86_64ReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksX86_64Release
+> Task :app:processX86_64ReleaseMainManifest
+> Task :app:mergeX86_64ReleaseResources
+> Task :app:processX86_64ReleaseManifest
+> Task :app:extractX86_64ReleaseNativeSymbolTables
+> Task :app:processX86_64ReleaseManifestForPackage
+> Task :app:javaPreCompileX86_64Release
+> Task :app:processX86_64ReleaseResources
+> Task :app:desugarX86_64ReleaseFileDependencies
+> Task :app:mergeX86_64ReleaseStartupProfile
+> Task :app:mergeExtDexX86_64Release
+> Task :app:mergeX86_64ReleaseArtProfile
+> Task :app:mergeX86_64ReleaseShaders
+> Task :app:compileX86_64ReleaseShaders NO-SOURCE
+> Task :app:generateX86_64ReleaseAssets UP-TO-DATE
+> Task :app:generateX86_64ReleasePythonMiscAssets
+> Task :app:packageArm64Release
+> Task :app:createArm64ReleaseApkListingFileRedirect
+> Task :app:assembleArm64Release
+> Task :app:generateX86_64ReleasePythonRequirementsAssets
+> Task :app:generateX86_64ReleasePythonSourceAssets
+> Task :app:generateX86_64ReleasePythonBuildAssets
+> Task :app:mergeX86_64ReleaseAssets
+> Task :app:extractX86_64ReleaseVersionControlInfo
+> Task :app:optimizeX86_64ReleaseResources
+> Task :app:compressX86_64ReleaseAssets
+> Task :app:collectX86_64ReleaseDependencies
+> Task :app:sdkX86_64ReleaseDependencyData
+> Task :app:validateSigningX86_64Release
+> Task :app:writeX86_64ReleaseAppMetadata
+> Task :app:writeX86_64ReleaseSigningConfigVersions
+> Task :bench:preBuild UP-TO-DATE
+> Task :bench:preReleaseBuild UP-TO-DATE
+> Task :bench:configureCMakeRelease[arm64-v8a]
+> Task :app:compileX86_64ReleaseKotlin
+> Task :app:mergeX86_64ReleaseNativeDebugMetadata
+> Task :bench:buildCMakeRelease[arm64-v8a]
+> Task :app:compileX86_64ReleaseJavaWithJavac
+> Task :app:dexBuilderX86_64Release
+> Task :app:mergeX86_64ReleaseGlobalSynthetics
+> Task :app:processX86_64ReleaseJavaRes
+> Task :app:mergeX86_64ReleaseJavaResource
+> Task :bench:configureCMakeRelease[x86_64]
+> Task :app:mergeDexX86_64Release
+> Task :bench:buildCMakeRelease[x86_64]
+> Task :bench:mergeReleaseJniLibFolders
+> Task :bench:buildKotlinToolingMetadata
+> Task :bench:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :bench:checkReleaseDuplicateClasses
+> Task :app:compileX86_64ReleaseArtProfile
+> Task :bench:checkReleaseAarMetadata
+> Task :bench:generateReleaseResValues
+> Task :bench:mapReleaseSourceSetPaths
+> Task :bench:generateReleaseResources
+> Task :bench:packageReleaseResources
+> Task :bench:parseReleaseLocalResources
+> Task :bench:createReleaseCompatibleScreenManifests
+> Task :bench:extractDeepLinksRelease
+> Task :bench:mergeReleaseResources
+> Task :bench:mergeReleaseNativeLibs
+> Task :bench:processReleaseMainManifest
+> Task :bench:processReleaseManifest
+> Task :bench:javaPreCompileRelease
+> Task :bench:processReleaseManifestForPackage
+> Task :bench:desugarReleaseFileDependencies
+> Task :bench:mergeReleaseStartupProfile
+> Task :bench:stripReleaseDebugSymbols
+> Task :bench:processReleaseResources
+> Task :app:packageX86_64Release
+> Task :app:createX86_64ReleaseApkListingFileRedirect
+> Task :app:assembleX86_64Release
+> Task :app:assembleRelease
+> Task :bench:extractReleaseNativeSymbolTables
+> Task :bench:mergeReleaseArtProfile
+> Task :bench:mergeReleaseShaders
+> Task :bench:compileReleaseShaders NO-SOURCE
+> Task :bench:generateReleaseAssets UP-TO-DATE
+> Task :bench:mergeReleaseAssets
+> Task :bench:compressReleaseAssets
+> Task :bench:extractReleaseVersionControlInfo
+> Task :bench:mergeExtDexRelease
+> Task :bench:collectReleaseDependencies
+> Task :bench:sdkReleaseDependencyData
+> Task :bench:optimizeReleaseResources
+> Task :bench:validateSigningRelease
+> Task :bench:writeReleaseAppMetadata
+> Task :bench:writeReleaseSigningConfigVersions
+> Task :compare:preBuild UP-TO-DATE
+> Task :compare:preReleaseBuild UP-TO-DATE
+> Task :compare:configureCMakeRelease[arm64-v8a]
+> Task :bench:compileReleaseKotlin
+> Task :bench:mergeReleaseNativeDebugMetadata
+> Task :compare:buildCMakeRelease[arm64-v8a]
+> Task :bench:compileReleaseJavaWithJavac NO-SOURCE
+> Task :bench:dexBuilderRelease
+> Task :bench:mergeReleaseGlobalSynthetics
+> Task :bench:processReleaseJavaRes
+> Task :compare:mergeReleaseJniLibFolders
+> Task :compare:checkReleaseDuplicateClasses
+> Task :compare:buildKotlinToolingMetadata
+> Task :compare:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :compare:checkReleaseAarMetadata
+> Task :compare:generateReleaseResValues
+> Task :bench:mergeReleaseJavaResource
+> Task :compare:mapReleaseSourceSetPaths
+> Task :compare:generateReleaseResources
+> Task :compare:packageReleaseResources
+> Task :compare:parseReleaseLocalResources
+> Task :compare:createReleaseCompatibleScreenManifests
+> Task :compare:extractDeepLinksRelease
+> Task :compare:processReleaseMainManifest
+> Task :compare:processReleaseManifest
+> Task :compare:processReleaseManifestForPackage
+> Task :compare:javaPreCompileRelease
+> Task :compare:mergeReleaseResources
+> Task :compare:desugarReleaseFileDependencies
+> Task :compare:mergeReleaseNativeLibs
+> Task :compare:mergeReleaseStartupProfile
+> Task :bench:mergeDexRelease
+> Task :compare:stripReleaseDebugSymbols
+> Task :bench:compileReleaseArtProfile
+> Task :compare:extractReleaseNativeSymbolTables
+> Task :compare:processReleaseResources
+> Task :compare:mergeReleaseNativeDebugMetadata
+> Task :bench:packageRelease
+> Task :bench:createReleaseApkListingFileRedirect
+> Task :bench:assembleRelease
+> Task :compare:mergeReleaseArtProfile
+> Task :compare:mergeReleaseShaders
+> Task :compare:compileReleaseShaders NO-SOURCE
+> Task :compare:generateReleaseAssets UP-TO-DATE
+> Task :compare:mergeReleaseAssets
+> Task :compare:compressReleaseAssets
+> Task :compare:extractReleaseVersionControlInfo
+> Task :compare:collectReleaseDependencies
+> Task :compare:sdkReleaseDependencyData
+> Task :compare:validateSigningRelease
+> Task :compare:writeReleaseAppMetadata
+> Task :compare:writeReleaseSigningConfigVersions
+> Task :compare:optimizeReleaseResources
+> Task :compare:mergeExtDexRelease
+> Task :compare:compileReleaseKotlin
+> Task :compare:compileReleaseJavaWithJavac NO-SOURCE
+> Task :compare:dexBuilderRelease
+> Task :compare:mergeReleaseGlobalSynthetics
+> Task :compare:processReleaseJavaRes
+> Task :compare:mergeReleaseJavaResource
+> Task :compare:mergeDexRelease
+> Task :compare:compileReleaseArtProfile
+> Task :compare:packageRelease
+> Task :compare:createReleaseApkListingFileRedirect
+> Task :compare:assembleRelease
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_3-1792490827452.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/stemdeck-android/stemdeck-android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 9m 50s
+214 actionable tasks: 214 executed
