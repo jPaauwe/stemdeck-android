@@ -47,6 +47,8 @@ class Job(
     var sectionsSource: String? = null
     /** Whether the sections stage runs for this song, chosen at import (desktop's auto_sections). */
     var autoSections: Boolean = false
+    /** The link's thumbnail (1.4), as desktop's thumbnail. */
+    var thumbnail: String? = null
     /** Android 1.3: lyrics kept beside the song (lyrics.json), as desktop's has_lyrics. */
     var hasLyrics: Boolean = false
     /** The file's own tags (title, artist, album), as desktop's audio_tags. */
@@ -72,7 +74,7 @@ class Job(
         put("stage", stage)
         put("title", title)
         put("duration", duration ?: JSONObject.NULL)
-        put("thumbnail", JSONObject.NULL)
+        put("thumbnail", thumbnail ?: JSONObject.NULL)
         put("bpm", bpm ?: JSONObject.NULL)
         put("key", key ?: JSONObject.NULL)
         put("scale", scale ?: JSONObject.NULL)
@@ -150,6 +152,7 @@ class Job(
                 n.keys().asSequence().associateWith { n.getString(it) }
             } ?: emptyMap()
             job.hasLyrics = o.optBoolean("has_lyrics", false)
+            job.thumbnail = optS("thumbnail")
             job.audioTags = o.optJSONObject("audio_tags")?.let { t ->
                 t.keys().asSequence().associateWith { t.optString(it) }
             } ?: emptyMap()

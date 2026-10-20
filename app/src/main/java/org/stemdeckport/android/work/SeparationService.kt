@@ -45,6 +45,8 @@ class SeparationService : Service() {
         private const val NOTIFICATION_ID = 1
         const val ACTION_CANCEL = "org.stemdeckport.android.CANCEL"
         private const val CHUNK_SECONDS = 24
+        /** Desktop's MAX_DURATION_SEC default for links: 20 minutes. */
+        private const val MAX_LINK_SECONDS = 1200.0
 
         fun start(context: Context) {
             try {
@@ -164,6 +166,25 @@ class SeparationService : Service() {
             }
             set("analyzing", "Loading the model", 0.04, persist = true)
             NativeEngine.loadModel(modelFile.absolutePath)
+
+            // 1b. A link (1.4): download its audio first.
+            if (store.inputFile(id) == null && !job.sourceUrl.startsWith("local:")) {
+                if (!app.settings.linkImport) throw IllegalStateException("Importing from links is off in Settings.")
+                set("downloading", "Looking up the link", 0.04, persist = true)
+                val got = org.stemdeckport.android.engine.LinkDownloader.download(
+                    this, job.sourceUrl, work, MAX_LINK_SECONDS,
+                ) { f, text ->
+                    if (f >= 0) set("downloading", text, 0.04 + 0.01 * f)
+                    !stopped()
+                }
+                store.update(id) {
+                    got.title?.let { t -> it.title = t }
+                    it.thumbnail = got.thumbnail
+                    it.audioTags = listOfNotNull(
+                        got.track?.let { t -> "title" to t }, got.artist?.let { a -> "artist" to a }, got.album?.let { a -> "album" to a },
+                    ).toMap()
+                }
+            }
 
             // 2. Decode and bring to 44.1 kHz stereo.
             val input = store.inputFile(id) ?: throw IllegalStateException("The imported file is missing.")

@@ -113,6 +113,22 @@ class JobStore(val root: File) {
         return job
     }
 
+    /** A queued job for a link (1.4): no input file yet, the service downloads it first. */
+    fun createFromUrl(title: String, url: String, selected: List<String>, format: String, autoSections: Boolean): Job {
+        val id = newId()
+        workDir(id).mkdirs()
+        stemsDir(id).mkdirs()
+        val job = Job(id, title, url, selected, System.currentTimeMillis() / 1000.0)
+        job.format = if (format == "mp3") "mp3" else "wav"
+        job.autoSections = autoSections
+        synchronized(lock) {
+            jobs[id] = job
+            persist(job)
+            lock.notifyAll()
+        }
+        return job
+    }
+
     fun inputFile(id: String): File? =
         workDir(id).listFiles()?.firstOrNull { it.name.startsWith("input") }
 

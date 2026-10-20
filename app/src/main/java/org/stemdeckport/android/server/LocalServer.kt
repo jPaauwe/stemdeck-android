@@ -115,6 +115,20 @@ class LocalServer(
             }
             return json(200, settings.toJson())
         }
+        // Android 1.4: yt-dlp's version and an update from its releases (Settings > Network).
+        if (parts[0] == "ytdlp") {
+            val ctx = org.stemdeckport.android.App.instance
+            if (method == Method.POST && parts.getOrNull(1) == "update") {
+                if (!settings.linkImport) return json(403, detail("Importing from links is off."))
+                return try {
+                    org.stemdeckport.android.engine.LinkDownloader.update(ctx)
+                    json(200, JSONObject().put("updated", true).put("detail", "Updated. The new yt-dlp is used after StemDeck restarts."))
+                } catch (e: Exception) {
+                    json(502, detail("Could not update yt-dlp: ${e.message}"))
+                }
+            }
+            return json(200, org.stemdeckport.android.engine.LinkDownloader.info(ctx))
+        }
         if (parts[0] == "diagnostics") {
             return text(200, org.stemdeckport.android.Diagnostics.lastReport() ?: "No crash recorded.")
         }
@@ -173,10 +187,7 @@ class LocalServer(
         val files = HashMap<String, String>()
         s.parseBody(files)
         val upload = files["file"]
-        if (upload == null) {
-            // JSON body: a link import. Not supported on the phone yet.
-            return json(400, detail("Links are not supported on Android yet. Download the audio and upload the file."))
-        }
+        if (upload == null) return createFromLink(files["postData"])
         val stemsParam = s.parameters["stems"]?.firstOrNull()
         val requested: List<String>? = try {
             stemsParam?.let { p -> JSONArray(p).let { a -> List(a.length()) { a.getString(it) } } }
@@ -291,6 +302,29 @@ class LocalServer(
             "none" -> json(409, detail("vocal split cancelled"))
             else -> json(500, detail("vocal split failed"))
         }
+    }
+
+    /**
+     * Link import (1.4), desktop's JSON {url, stems}: only while it is on in
+     * Settings, and only links desktop accepts (LinkUrl). The service
+     * downloads the audio before separating.
+     */
+    private fun createFromLink(body: String?): Response {
+        if (!settings.linkImport) {
+            return json(403, detail("Importing from links is off. Turn it on in Settings, under Network.").put("disabled", true))
+        }
+        val o = try { JSONObject(body ?: "{}") } catch (e: Exception) { return json(422, detail("invalid JSON body")) }
+        val url = try {
+            org.stemdeckport.android.data.LinkUrl.validate(o.optString("url"))
+        } catch (e: org.stemdeckport.android.data.LinkUrl.Invalid) {
+            return json(422, detail(e.message ?: "invalid URL"))
+        }
+        val requested = o.optJSONArray("stems")?.let { a -> List(a.length()) { a.optString(it) } }
+        val selected = requested?.filter { it in NativeEngine.SOURCES }?.takeIf { it.isNotEmpty() } ?: NativeEngine.SOURCES
+        val format = o.optString("format").takeIf { it in Settings.FORMATS } ?: settings.stemFormat
+        val job = store.createFromUrl(url, url, selected, format, settings.autoSections)
+        onJobQueued()
+        return json(200, JSONObject().put("job_id", job.id).put("status", job.status))
     }
 
     /** The file's title, artist and album tags (desktop's audio_tags), for the lyrics lookup. */

@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.chaquo.python")
 }
 
 android {
@@ -96,6 +97,51 @@ android {
         jniLibs { useLegacyPackaging = true }
     }
 }
+
+// Link import (1.4): yt-dlp (Unlicense) and its YouTube challenge solver
+// scripts, yt-dlp-ejs (Unlicense), on Chaquopy's Python. Pinned: yt-dlp 2026.08.19
+// asks for yt-dlp-ejs 0.8.0. The app can update yt-dlp itself from Settings.
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+        pip {
+            install("yt-dlp==2026.8.19")
+            install("yt-dlp-ejs==0.8.0")
+            install("certifi")
+        }
+    }
+}
+
+// QuickJS-NG's qjs, the JavaScript runtime yt-dlp runs for YouTube's
+// challenges, built with the NDK as an executable named libqjs.so so that
+// Android installs it in the native library directory, where an app may run
+// programs (src/main/qjs/CMakeLists.txt).
+val qjsAbis = listOf("arm64-v8a", "x86_64")
+val qjsOut = layout.buildDirectory.dir("qjs/jniLibs")
+val buildQuickJs by tasks.registering {
+    inputs.file("src/main/qjs/CMakeLists.txt")
+    outputs.dir(qjsOut)
+    doLast {
+        val sdk = android.sdkDirectory
+        val cmake = File(sdk, "cmake/3.22.1/bin/cmake")
+        val ninja = File(sdk, "cmake/3.22.1/bin/ninja")
+        val toolchain = File(android.ndkDirectory, "build/cmake/android.toolchain.cmake")
+        fun run(vararg cmd: String) {
+            val p = ProcessBuilder(*cmd).inheritIO().start()
+            if (p.waitFor() != 0) throw GradleException("failed: ${cmd.joinToString(" ")}")
+        }
+        for (abi in qjsAbis) {
+            val build = layout.buildDirectory.dir("qjs/build-$abi").get().asFile
+            run(cmake.path, "-S", file("src/main/qjs").path, "-B", build.path, "-G", "Ninja",
+                "-DCMAKE_MAKE_PROGRAM=${ninja.path}", "-DCMAKE_TOOLCHAIN_FILE=${toolchain.path}",
+                "-DANDROID_ABI=$abi", "-DANDROID_PLATFORM=android-29", "-DCMAKE_BUILD_TYPE=Release")
+            run(cmake.path, "--build", build.path, "--target", "qjs_exe")
+            run(cmake.path, "--install", build.path, "--strip", "--prefix", qjsOut.get().dir(abi).asFile.path)
+        }
+    }
+}
+android.sourceSets.getByName("main").jniLibs.srcDir(qjsOut)
+tasks.named("preBuild") { dependsOn(buildQuickJs) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")

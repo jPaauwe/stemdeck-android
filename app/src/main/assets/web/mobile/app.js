@@ -117,6 +117,7 @@ fetch("/api/settings").then((r) => r.json()).then((s) => {
   // an earlier session does not survive into this one.
   if (s && s.auto_sections) saveAutoSections(false);
   if (s && typeof s.lyrics_lookup === "boolean") state.lyricsLookup = s.lyrics_lookup;
+  if (s && typeof s.link_import === "boolean") state.linkImport = s.link_import;
   render();
 }).catch(() => {});
 // Android: which models the first song will download (the Extract screen says so).
@@ -160,6 +161,8 @@ const state = {
   autoSections: false,
   loopSection: null, // Android: id of the section the transport loops, or null
   lyricsLookup: false, // Android: Settings > Network, off until turned on
+  linkImport: false, // Android 1.4: Settings > Network, off until turned on
+  ytdlp: null, // Android 1.4: { yt_dlp, js_runtime, updated } for Settings
 };
 
 let extractES = null; // EventSource for the active extraction
@@ -565,8 +568,16 @@ function settingsScreen() {
       <div class="set-note">StemDeck separates and analyses on this phone. It downloads each model once, the first time a feature needs it, and nothing else goes online unless you turn it on here.</div>
       ${row("set-lyrics", state.lyricsLookup, "Look up lyrics",
         "For each new song, and when you search in the Lyrics tab, asks LRCLIB (lrclib.net). Only the artist, title, album and length are sent.")}
+      ${row("set-links", state.linkImport, "Import from links",
+        "Paste a YouTube or SoundCloud link on the Extract screen; yt-dlp downloads the audio on the phone. Those sites see the request like any visit. Only use audio you have the right to use: downloading from YouTube is against its terms of service.")}
+      ${state.linkImport ? `<div class="set-sub" style="margin:2px 0 10px">${state.ytdlp ? esc(state.ytdlp.error ? `yt-dlp could not start: ${state.ytdlp.error}` : `yt-dlp ${state.ytdlp.yt_dlp}${state.ytdlp.updated ? " (updated)" : ""}, ${state.ytdlp.js_runtime || "no JavaScript runtime found"}`) : "Checking yt-dlp…"}</div>
+        <button class="cta sm ghost" data-action="ytdlp-update">Update yt-dlp</button>` : ""}
     </div>
   </div>`;
+}
+
+function refreshYtdlp() {
+  fetch("/api/ytdlp").then((r) => r.json()).then((d) => { state.ytdlp = d; if (state.tab === "settings") render(); }).catch(() => {});
 }
 
 function saveSetting(body, apply) {
@@ -1157,7 +1168,8 @@ function extractScreen() {
   return `<div class="screen scrl">
     <div class="pad">
       <div class="h1">Extract stems</div>
-      <div class="sub">Upload audio to split it into stems on this phone.</div>
+      <div class="sub">${state.linkImport ? "Paste a link or upload audio to split it into stems on this phone." : "Upload audio to split it into stems on this phone."}</div>
+      ${state.linkImport ? `<div class="paste">${ICON.link}<input id="ext-url" class="ext-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste a YouTube or SoundCloud link" value="${esc(state.extractUrl || "")}"></div>` : ""}
       <button class="upload" data-action="pick-file">${ICON.upload}${fileName ? esc(fileName) : "Upload audio file"}</button>
       <input id="ext-file" type="file" accept="audio/*,video/mp4,.mp3,.wav,.flac,.m4a,.ogg,.opus" style="display:none">
       <div class="eyebrow">STEMS TO EXTRACT</div>
@@ -1216,7 +1228,7 @@ async function startExtraction() {
   if (!stems.length) { toast("Pick at least one stem."); return; }
   const file = state.extractFile;
   const url = (state.extractUrl || "").trim();
-  if (!file && !url) { toast("Choose an audio file first."); return; }
+  if (!file && !url) { toast(state.linkImport ? "Paste a link or choose a file first." : "Choose an audio file first."); return; }
 
   let init, title;
   if (file) {
@@ -1641,6 +1653,7 @@ app.addEventListener("click", (e) => {
       return;
     case "tab":
       state.tab = t.dataset.tab;
+      if (state.tab === "settings" && state.linkImport && !state.ytdlp) refreshYtdlp(); // Android 1.4
       break;
     case "mixview":
       state.mixerView = t.dataset.view;
@@ -1665,6 +1678,13 @@ app.addEventListener("click", (e) => {
       state.solo[t.dataset.id] = !state.solo[t.dataset.id];
       applyMix();
       break;
+    case "set-links": // Android 1.4
+      saveSetting({ link_import: !state.linkImport }, (d) => { state.linkImport = !!d.link_import; if (state.linkImport) refreshYtdlp(); });
+      return;
+    case "ytdlp-update": // Android 1.4
+      toast("Updating yt-dlp…");
+      fetch("/api/ytdlp/update", { method: "POST" }).then((r) => r.json()).then((d) => toast(d.detail || "Done.")).catch(() => toast("Couldn't update yt-dlp."));
+      return;
     case "set-lyrics": // Android
       saveSetting({ lyrics_lookup: !state.lyricsLookup }, (d) => { state.lyricsLookup = !!d.lyrics_lookup; });
       return;
