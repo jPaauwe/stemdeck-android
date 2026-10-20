@@ -312,12 +312,12 @@ jobs:
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           set -o pipefail
-          ./gradlew --no-daemon :app:testReleaseUnitTest assembleRelease 2>&1 | tee gradle.log
+          ./gradlew --no-daemon :app:testArm64ReleaseUnitTest assembleRelease 2>&1 | tee gradle.log
       - name: Native libraries are 16 KB aligned; APK size
         run: |
           set -o pipefail
-          for abi in arm64-v8a x86_64; do
-            python3 scripts/check_apk.py app/build/outputs/apk/release/app-$abi-release.apk | tee -a apk-check.log
+          for abi in arm64 x86_64; do
+            python3 scripts/check_apk.py app/build/outputs/apk/$abi/release/app-$abi-release.apk | tee -a apk-check.log
           done
       - name: Publish logs to a ci-logs branch
         if: always()
@@ -326,8 +326,8 @@ jobs:
         run: scripts/ci_logs.sh ${{ github.job }} ${{ github.run_id }} ${{ github.sha }} ${{ job.status == 'failure' }}
       - name: Rename
         run: |
-          cp app/build/outputs/apk/release/app-arm64-v8a-release.apk StemDeck-Android.apk
-          cp app/build/outputs/apk/release/app-x86_64-release.apk StemDeck-Android-x86_64.apk
+          cp app/build/outputs/apk/arm64/release/app-arm64-release.apk StemDeck-Android.apk
+          cp app/build/outputs/apk/x86_64/release/app-x86_64-release.apk StemDeck-Android-x86_64.apk
           cp bench/build/outputs/apk/release/bench-release.apk StemDeck-Bench.apk
           cp compare/build/outputs/apk/release/compare-release.apk StemDeck-Compare.apk
       - name: The APKs on a branch too, for testing a pull request on a phone or emulator

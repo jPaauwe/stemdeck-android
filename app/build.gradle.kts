@@ -19,10 +19,6 @@ android {
 
         externalNativeBuild {
             cmake {
-                // arm64 for phones; x86_64 so it also runs in the emulator.
-                // (The APK splits below pick the same two; Gradle refuses
-                // ndk.abiFilters alongside splits.)
-                abiFilters += listOf("arm64-v8a", "x86_64")
                 arguments += listOf("-DANDROID_STL=c++_shared", "-DCMAKE_BUILD_TYPE=Release")
             }
         }
@@ -85,13 +81,12 @@ android {
     // One APK per ABI, native libraries compressed: ONNX Runtime alone is
     // 34 MB (arm64) and 41 MB (x86_64) uncompressed, which made a single
     // APK 87 MB. Phones get the arm64 APK; the x86_64 one is for the emulator.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = false
-        }
+    // Flavors rather than APK splits, because Chaquopy reads the ABIs from
+    // ndk.abiFilters, which Gradle refuses alongside splits.
+    flavorDimensions += "abi"
+    productFlavors {
+        create("arm64") { dimension = "abi"; ndk { abiFilters += "arm64-v8a" } }
+        create("x86_64") { dimension = "abi"; ndk { abiFilters += "x86_64" } }
     }
     packaging {
         jniLibs { useLegacyPackaging = true }
