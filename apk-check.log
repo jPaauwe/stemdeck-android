@@ -1,0 +1,34 @@
+library                                                    size  stored   align offset%16K
+lib/arm64-v8a/libc++_shared.so                            1.29M   False   16384       3328 
+lib/arm64-v8a/libchaquopy_java.so                         0.16M   False   16384        354 
+lib/arm64-v8a/libcrypto_chaquopy.so                       0.00M   False   16384      12063 
+lib/arm64-v8a/libcrypto_python.so                         3.72M   False   16384      13264 
+lib/arm64-v8a/libmp3lame.so                               0.33M   False   16384       7797 
+lib/arm64-v8a/libonnxruntime.so                          34.21M   False   16384      12823 
+lib/arm64-v8a/libonnxruntime4j_jni.so                     0.09M   False   16384       6399 
+lib/arm64-v8a/libpython3.13.so                            5.39M   False   16384       2985 
+lib/arm64-v8a/libqjs.so                                   1.23M   False   16384      12535 
+lib/arm64-v8a/libsdengine.so                              1.13M   False   16384       8898 
+lib/arm64-v8a/libsqlite3_chaquopy.so                      0.00M   False   16384      15395 
+lib/arm64-v8a/libsqlite3_python.so                        0.89M   False   16384        213 
+lib/arm64-v8a/libssl_chaquopy.so                          0.00M   False   16384      16184 
+lib/arm64-v8a/libssl_python.so                            0.62M   False   16384        997 
+
+APK 37.7 MB, native libraries 18.4 MB of it
+library                                                    size  stored   align offset%16K
+lib/x86_64/libc++_shared.so                               1.25M   False   16384       3317 
+lib/x86_64/libchaquopy_java.so                            0.16M   False   16384       9822 
+lib/x86_64/libcrypto_chaquopy.so                          0.00M   False   16384       7885 
+lib/x86_64/libcrypto_python.so                            3.79M   False   16384       9034 
+lib/x86_64/libmp3lame.so                                  0.37M   False   16384      10169 
+lib/x86_64/libonnxruntime.so                             40.83M   False   16384       3109 
+lib/x86_64/libonnxruntime4j_jni.so                        0.09M   False   16384       4875 
+lib/x86_64/libpython3.13.so                               5.33M   False   16384       1178 
+lib/x86_64/libqjs.so                                      1.31M   False   16384       4710 
+lib/x86_64/libsdengine.so                                 1.47M   False   16384        215 
+lib/x86_64/libsqlite3_chaquopy.so                         0.00M   False   16384       5052 
+lib/x86_64/libsqlite3_python.so                           0.87M   False   16384       6203 
+lib/x86_64/libssl_chaquopy.so                             0.00M   False   16384      12123 
+lib/x86_64/libssl_python.so                               0.65M   False   16384      13278 
+
+APK 40.2 MB, native libraries 20.8 MB of it
