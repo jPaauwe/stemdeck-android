@@ -16,12 +16,12 @@ android {
         // VERSION, or VERSION-dev.N for development builds (see .github/workflows/build.yml).
         versionName = System.getenv("APP_VERSION")?.ifEmpty { null } ?: "1.0.0-dev"
 
-        ndk {
-            // arm64 for phones; x86_64 so it also runs in the emulator.
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
         externalNativeBuild {
             cmake {
+                // arm64 for phones; x86_64 so it also runs in the emulator.
+                // (The APK splits below pick the same two; Gradle refuses
+                // ndk.abiFilters alongside splits.)
+                abiFilters += listOf("arm64-v8a", "x86_64")
                 arguments += listOf("-DANDROID_STL=c++_shared", "-DCMAKE_BUILD_TYPE=Release")
             }
         }
