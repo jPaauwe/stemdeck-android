@@ -34,42 +34,42 @@ class ModelManager(
             ModelManager(
                 context, "allinone_harmonix_fold0.onnx",
                 "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold0.onnx",
-                "7581c0c3cf74104342f6fe731fe3987870e6f3d6da7996177b0f5ed193646cde",
+                "166d10540f9434693ff4d6bc43caddbed4ed3bd74f5d28fd5953091d80fcdc0c",
             ),
             ModelManager(
                 context, "allinone_harmonix_fold1.onnx",
                 "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold1.onnx",
-                "7d45cd6421ccf8b6bd684e3bd626b708b4071ae9d1ea42d0737b87331e70d396",
+                "ecaf4168d24bb0646ce998c6b78dd278cf66343477062fbff585c3806e588b38",
             ),
             ModelManager(
                 context, "allinone_harmonix_fold2.onnx",
                 "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold2.onnx",
-                "eb6de214aa957833bd6103a84d2c0f4bf72b2bdeab8af217f15ebbc8a0c24534",
+                "e0ba4f73c4bfb29bc77734ea3d235a16fdd176c2bded0c89453d916ccfcde0fe",
             ),
             ModelManager(
                 context, "allinone_harmonix_fold3.onnx",
                 "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold3.onnx",
-                "11dd0068462559280165296d87e5b0366edd12c38512511bc31aed650fbe51d3",
+                "05f6b178686c4c02016bea3c0deafb0764ebc876d2b4efca17773fd305150a52",
             ),
             ModelManager(
                 context, "allinone_harmonix_fold4.onnx",
                 "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold4.onnx",
-                "df67e2ce1b9b1f5da2376940cefe104fb0e431daba3e17b38ebfb7daafc1c984",
+                "f388d6dc941b15ad3b0b4fad2e7dd17dc995cf5b3f21026b6cf050816e12038c",
             ),
             ModelManager(
                 context, "allinone_harmonix_fold5.onnx",
                 "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold5.onnx",
-                "14158336792ebc5319dff0a129c85591e239ce16dde65321c46c7a548c413c25",
+                "f504003328f58ab5c89874c6e5c65ab07e2a213bbd672b7cc39f1ac29be34012",
             ),
             ModelManager(
                 context, "allinone_harmonix_fold6.onnx",
                 "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold6.onnx",
-                "43b2627438425db41c41c1e93a77b248a3ac32df5cfc47190b385752c0d3fb6a",
+                "d19b5c4085c321d51762ab6cb8d29c24ee2acca079919b82030c944db3f262b3",
             ),
             ModelManager(
                 context, "allinone_harmonix_fold7.onnx",
                 "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold7.onnx",
-                "c5709a1be3d2dcf2a1dd2b0acf279dc94b2649167b37d963bdf1f4af1af7c767",
+                "58581305f8af98ff25e68935225fa4ef12dc5b3e8770bf5fba7e2ac374072802",
             ),
         )
 

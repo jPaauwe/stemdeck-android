@@ -152,7 +152,7 @@ def export_allinone(ckpt_dir: str, out_dir: Path) -> list[Path]:
                 input_names=["features"], output_names=names,
                 dynamic_axes={"features": {2: "frames"}, "beat": {1: "frames"}, "downbeat": {1: "frames"},
                               "section": {1: "frames"}, "function": {2: "frames"}, "embedding": {2: "frames"}},
-                opset_version=17, do_constant_folding=True, dynamo=False,
+                opset_version=17, do_constant_folding=False, dynamo=False,  # see export_beat_this
             )
         finally:
             na._na1d_indices, dinat.DinatLayer1d.maybe_pad = original
