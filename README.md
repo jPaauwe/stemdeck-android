@@ -47,6 +47,17 @@ the same key, so a new APK installs over the old one and keeps your library.
   key from the guitar, piano, other, vocals and bass stems, the way desktop
   StemDeck does. The first song downloads the beat model once (82 MB). If a
   song has no grid (too few beats, say) the Analysis tab says why.
+- **Sections**: tick *Find the sections (intro, verse, chorus…)* on the
+  Extract screen and the app labels the song's parts the way desktop
+  StemDeck does (All-In-One's eight Harmonix models on the stems, then
+  desktop's clean-up). The Mixer shows them as a strip above the waveform:
+  tap a section to jump to it, long-press to loop it. The first song
+  downloads the section models once (27 MB).
+- **Lead + Backing**: with *Vocals* picked, choose *Lead + Backing* on the
+  Extract screen and the vocals stem is split into lead and backing vocals
+  after separating, with desktop's model (UVR-MDX-NET Karaoke 2). The Mixer
+  then has a lane for each. The first split downloads the model once
+  (53 MB).
 - Stems are **320 kbps MP3** files by default (about 2.4 MB a minute each).
   Choose **WAV** under *File format* on the Extract screen for lossless 16-bit
   stems (about 10 MB a minute each). The choice is remembered, applies to new
@@ -69,6 +80,8 @@ the same key, so a new APK installs over the old one and keeps your library.
 | Beat grid: Beat This! (PyTorch) + `beatgrid.py` (librosa, numpy) | Beat This! exported to ONNX and run with ONNX Runtime; its log-mel front end, ffmpeg's downmix and resampler, and the clean-up ported to C++ (`analysis/`) |
 | Key: `analyze.py` (librosa `chroma_cqt`) | The constant-Q chroma, tuning estimate and key logic ported to C++ (`analysis/`) |
 | Click track: `metronome.js` / `click_render.py` | `metronome.js` unchanged in the WebView; the renderer ported to C++ for *Export mix* |
+| Sections: All-In-One (`all-in-one-infer`, madmom spectrogram) + `section_refine.py` | The eight `harmonix` folds exported to ONNX; madmom's spectrogram, the functional post-processing, the refinement and `normalize_sections` ported to C++ (`analysis/src/sections.cpp`) |
+| Lead/backing split: `audio-separator` with UVR-MDX-NET Karaoke 2 | The same ONNX model with ONNX Runtime; audio-separator's MDX chunking, STFT and mixing ported to C++ (`analysis/src/vocal_split.cpp`) |
 
 The engine separates the song the way PyTorch Demucs does: normalized with
 the whole song's statistics, cut into Demucs' own 7.8-second segments with a
@@ -81,7 +94,10 @@ every push (`scripts/analysis_parity.py` in CI): the beat grid gives the same
 beats and bars on synthetic bands, click tracks and recordings (fast and
 rubato ones included); the key agrees on all 33 songs of desktop's labelled
 key set and on the recordings; the click renders are sample for sample the
-same, and the JavaScript scheduler matches desktop's shared fixture. The
+same, and the JavaScript scheduler matches desktop's shared fixture; the
+sections come out the same on separated recordings (boundaries and labels),
+and the lead and backing vocals match audio-separator's to within float
+rounding (85–106 dB signal-to-difference). The
 details are in [`analysis/README.md`](analysis/README.md).
 
 ## Privacy
@@ -93,7 +109,11 @@ a pinned SHA-256:
 
 - the separation model (55 MB) from Hugging Face
   (`huggingface.co/datasets/Retrobear/demucs.cpp`),
-- the beat model (82 MB) from this repository's `models-1` release on GitHub.
+- the beat model (82 MB) and, if you ask for sections, the section models
+  (27 MB) from this repository's `models-1` release on GitHub,
+- if you ask for a lead/backing split, the vocal split model (53 MB) from the
+  Ultimate Vocal Remover project's model repository on GitHub
+  (`github.com/TRvlvr/model_repo`), where desktop StemDeck gets it too.
 
 Those requests carry nothing about you or your songs. The interface's fonts
 are bundled with the app, so opening it contacts nobody. ONNX Runtime's
@@ -146,8 +166,7 @@ both:
 
 ## Not yet on Android
 
-Planned for later stages: YouTube/SoundCloud links, lyrics, the
-lead/backing vocal split, sections.
+Planned for later stages: YouTube/SoundCloud links, lyrics.
 
 ## Building yourself
 
@@ -187,6 +206,21 @@ installs them on first sync). StemDeck Compare also needs Python 3.
   University Linz), code and the `final0` weights: MIT. The app downloads an
   ONNX export of the published checkpoint, made reproducibly by
   `scripts/export_models.py` (`models/models.json`).
+- [All-In-One](https://github.com/mir-aidj/all-in-one) (Taejun Kim, Juhan
+  Nam) and its inference fork
+  [all-in-one-infer](https://github.com/openmirlab/all-in-one-infer): code
+  MIT. The `harmonix` weights are marked MIT on their Hugging Face page
+  (`taejunkim/allinone`), but all-in-one-infer's checkpoint list gives them
+  as CC-BY-NC-SA-4.0; until that is settled, treat the section models as
+  non-commercial. The app downloads ONNX exports of them, made reproducibly
+  by `scripts/export_models.py`.
+- UVR-MDX-NET Karaoke 2, trained by the
+  [Ultimate Vocal Remover](https://github.com/Anjok07/ultimatevocalremovergui)
+  project: MIT, with credit to UVR and its developers
+  as [audio-separator](https://github.com/nomadkaraoke/python-audio-separator)
+  (MIT) asks. Its MDX processing is ported from audio-separator.
+- [madmom](https://github.com/CPJKU/madmom): BSD 2-Clause (the spectrogram
+  front end is ported).
 - [ONNX Runtime](https://github.com/microsoft/onnxruntime) 1.31.0: MIT
   (`analysis/third_party/onnxruntime`).
 - The analysis ports in `analysis/` follow desktop StemDeck's Python

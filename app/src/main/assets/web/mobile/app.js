@@ -987,7 +987,7 @@ function modelNote() {
   const need = [];
   if (!m.separation) need.push("the separation model (55 MB)");
   if (!m.beat) need.push("the beat model for the click track (82 MB)");
-  if (state.autoSections && !m.sections) need.push("the section model (25 MB)");
+  if (state.autoSections && !m.sections) need.push("the section models (27 MB)");
   if (state.selected.vocals && state.vocalSplitMode === "split" && !m.vocal_split) need.push("the vocal split model (53 MB)");
   if (!need.length) return "";
   return `<div class="model-note">The first song downloads ${need.join(" and ")}, once.</div>`;
