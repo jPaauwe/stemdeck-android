@@ -1,0 +1,32 @@
+
+Sections (All-In-One harmonix-all + section_refine), 5 songs:
+case                                                  spec max  post  sections bound max  labels
+=> Found 0 spectrograms already extracted, 1 to extract.
+Karissa_Hobbs_-_Lets_Go_Fishin.hq.ogg (filtered)       2.4e-07  same    7/7        0.000    100%
+   timings: spectrogram 0.82 s, eight folds 31.91 s, post 0.107 s for 133 s of audio
+=> Found 0 spectrograms already extracted, 1 to extract.
+Kevin_MacLeod_-_P_I_Tchaikovsky_Dance_of (filtered)    2.4e-07  same    5/5        0.000    100%
+   timings: spectrogram 0.76 s, eight folds 30.81 s, post 0.096 s for 120 s of audio
+=> Found 0 spectrograms already extracted, 1 to extract.
+Kevin_MacLeod_-_Vibe_Ace.hq.ogg (filtered)             2.4e-07  same    2/2        0.000    100%
+   timings: spectrogram 0.41 s, eight folds 23.99 s, post 0.045 s for 61 s of audio
+=> Found 0 spectrograms already extracted, 1 to extract.
+442789__lena-orsa__happy-music-pistachio (filtered)    2.4e-07  same    3/3        0.000    100%
+   timings: spectrogram 0.45 s, eight folds 25.12 s, post 0.055 s for 71 s of audio
+=> Found 0 spectrograms already extracted, 1 to extract.
+[0;93m2026-10-20 10:18:28.967232480 [W:onnxruntime:Default, device_discovery.cc:146 GetPciBusId] Skipping pci_bus_id for PCI path at "/sys/devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/5620e0c7-8062-4dce-aeb7-520c7ef76171" because filename "5620e0c7-8062-4dce-aeb7-520c7ef76171" did not match expected pattern of [0-9a-f]+:[0-9a-f]+:[0-9a-f]+[.][0-9a-f]+[m
+admiralbob77_-_Choice_-_Drum-bass.hq.ogg (filtered)    2.4e-07  same    0/0        0.000    100%
+   timings: spectrogram 0.15 s, eight folds 20.12 s, post 0.017 s for 25 s of audio
+
+Lead/backing vocal split (UVR-MDX-NET Karaoke 2), 5 vocals stems:
+case                                                  lead SNR backing SNR same samples  lead+1.065 backing
+  0%|          | 0.00/3.54k [00:00<?, ?iB/s]28.3kiB [00:00, 76.1MiB/s]                  
+  0%|          | 0.00/1.00k [00:00<?, ?iB/s]4.38kiB [00:00, 18.8MiB/s]                  
+  0%|          | 0.00/2.77k [00:00<?, ?iB/s]15.4kiB [00:00, 49.9MiB/s]                  
+Karissa_Hobbs_-_Lets_Go_Fishin.hq.ogg (filtered)       100.2 dB      90.5 dB     99.9808%             64.2 dB
+Kevin_MacLeod_-_P_I_Tchaikovsky_Dance_of (filtered)     91.9 dB      95.2 dB     99.9745%             63.1 dB
+Kevin_MacLeod_-_Vibe_Ace.hq.ogg (filtered)              93.6 dB      85.2 dB     99.9903%             55.6 dB
+442789__lena-orsa__happy-music-pistachio (filtered)     87.9 dB     100.7 dB     99.9601%             67.7 dB
+admiralbob77_-_Choice_-_Drum-bass.hq.ogg (filtered)     88.9 dB      74.9 dB     99.9944%             47.4 dB
+
+All within limits.

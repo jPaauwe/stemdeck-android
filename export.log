@@ -1,0 +1,31 @@
+  b = len(x)
+  q, k, v = rearrange(
+  assert rot_dim <= t.shape[-1], f'feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}'
+  beat, downbeat = rearrange(beat_downbeat, "b t c -> c b t", c=2)
+[0;93m2026-10-20 10:09:18.748470293 [W:onnxruntime:Default, device_discovery.cc:146 GetPciBusId] Skipping pci_bus_id for PCI path at "/sys/devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/5620e0c7-8062-4dce-aeb7-520c7ef76171" because filename "5620e0c7-8062-4dce-aeb7-520c7ef76171" did not match expected pattern of [0-9a-f]+:[0-9a-f]+:[0-9a-f]+[.][0-9a-f]+[m
+  if height < window_size or width < window_size:
+  pad_r = max(0, window_size - width)
+  pad_b = max(0, window_size - height)
+  if was_padded:
+  if logits.shape[1] == 1:
+  beat_this 1500 frames: ONNX vs PyTorch max |diff| 2.38e-06
+  beat_this 1000 frames: ONNX vs PyTorch max |diff| 2.21e-06
+  beat_this 300 frames: ONNX vs PyTorch max |diff| 1.67e-06
+  beat_this 37 frames: ONNX vs PyTorch max |diff| 1.19e-06
+  all-in-one fold 0: ONNX vs PyTorch max |diff| 6.20e-06
+  all-in-one fold 1: ONNX vs PyTorch max |diff| 2.86e-06
+  all-in-one fold 2: ONNX vs PyTorch max |diff| 4.29e-06
+  all-in-one fold 3: ONNX vs PyTorch max |diff| 3.81e-06
+  all-in-one fold 4: ONNX vs PyTorch max |diff| 3.34e-06
+  all-in-one fold 5: ONNX vs PyTorch max |diff| 2.86e-06
+  all-in-one fold 6: ONNX vs PyTorch max |diff| 2.86e-06
+  all-in-one fold 7: ONNX vs PyTorch max |diff| 4.77e-06
+beat_this_final0.onnx: 82098874 bytes, sha256 94553b89d3d8eb5dbdbaea796583df6a6e6340b8b5488d48b04143a4c10d9729 (matches models.json)
+allinone_harmonix_fold0.onnx: 3318773 bytes, sha256 166d10540f9434693ff4d6bc43caddbed4ed3bd74f5d28fd5953091d80fcdc0c (matches models.json)
+allinone_harmonix_fold1.onnx: 3318773 bytes, sha256 ecaf4168d24bb0646ce998c6b78dd278cf66343477062fbff585c3806e588b38 (matches models.json)
+allinone_harmonix_fold2.onnx: 3318773 bytes, sha256 e0ba4f73c4bfb29bc77734ea3d235a16fdd176c2bded0c89453d916ccfcde0fe (matches models.json)
+allinone_harmonix_fold3.onnx: 3318773 bytes, sha256 05f6b178686c4c02016bea3c0deafb0764ebc876d2b4efca17773fd305150a52 (matches models.json)
+allinone_harmonix_fold4.onnx: 3318773 bytes, sha256 f388d6dc941b15ad3b0b4fad2e7dd17dc995cf5b3f21026b6cf050816e12038c (matches models.json)
+allinone_harmonix_fold5.onnx: 3318773 bytes, sha256 f504003328f58ab5c89874c6e5c65ab07e2a213bbd672b7cc39f1ac29be34012 (matches models.json)
+allinone_harmonix_fold6.onnx: 3318773 bytes, sha256 d19b5c4085c321d51762ab6cb8d29c24ee2acca079919b82030c944db3f262b3 (matches models.json)
+allinone_harmonix_fold7.onnx: 3318773 bytes, sha256 58581305f8af98ff25e68935225fa4ef12dc5b3e8770bf5fba7e2ac374072802 (matches models.json)

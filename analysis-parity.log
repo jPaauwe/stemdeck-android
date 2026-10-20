@@ -1,0 +1,37 @@
+case                                                        beats ref/port bars equal         BPM ref/port   median      max
+synthetic band 72 BPM                                           48/48            True    72.024/72.024       0.00ms    0.0ms
+synthetic band 120 BPM                                          80/80            True   119.848/119.848      0.00ms    0.0ms
+synthetic band 176 BPM                                         118/118           True   175.748/175.748      0.00ms    0.0ms
+synthetic band 200 BPM                                         134/134           True   200.212/200.212      0.00ms    0.0ms
+click 60 BPM                                                    30/30            True    60.002/60.002       0.00ms    0.0ms
+click 90 BPM                                                    45/45            True    90.013/90.013       0.00ms    0.0ms
+click 140 BPM                                                   70/70            True   140.038/140.038      0.00ms    0.0ms
+click 180 BPM                                                   90/90            True   179.945/179.945      0.00ms    0.0ms
+147793__setuniman__sweet-waltz-0i-22mi.hq.ogg                  123/123           True   149.892/149.892      0.00ms    0.0ms
+442789__lena-orsa__happy-music-pistachio-ice-cream-ragtime     170/170           True   143.955/143.955      0.00ms    0.0ms
+Hungarian_Dance_number_5_-_Allegro_in_F_sharp_minor_(strin      87/87            True   148.941/148.941      0.00ms    0.0ms
+Karissa_Hobbs_-_Lets_Go_Fishin.hq.ogg                          200/200           True    89.070/89.070       0.00ms    0.0ms
+Kevin_MacLeod_-_P_I_Tchaikovsky_Dance_of_the_Sugar_Plum_Fa     216/216           True   109.153/109.153      0.00ms    0.0ms
+Kevin_MacLeod_-_Vibe_Ace.hq.ogg                                155/155           True   132.093/132.093      0.00ms    0.0ms
+admiralbob77_-_Choice_-_Drum-bass.hq.ogg                        28/28            True    67.931/67.931       0.00ms    0.0ms
+drese-midi.hq.ogg                                               40/40            True    71.032/71.032       0.00ms    0.0ms
+drese-tempo.hq.ogg                                              46/46            True   105.919/105.919      0.00ms    0.0ms
+snare-accelerate.hq.ogg                                         60/60            True   125.718/125.718      0.00ms    0.0ms
+
+Key set (tests/keyset.py, 33 songs, stems path):
+   same key and scale on 33 of 33 (100%)
+   147793__setuniman__sweet-waltz-0i-22mi.hq.ogg      desktop ('A# maj', 'Major', 24)  Android ('A# maj', 'Major', 24)
+   442789__lena-orsa__happy-music-pistachio-ice-cream desktop ('D min', 'Natural Minor', 29)  Android ('D min', 'Natural Minor', 29)
+   Hungarian_Dance_number_5_-_Allegro_in_F_sharp_mino desktop ('G min', 'Natural Minor', 100)  Android ('G min', 'Natural Minor', 100)
+   Karissa_Hobbs_-_Lets_Go_Fishin.hq.ogg              desktop ('A# maj', 'Major', 100)  Android ('A# maj', 'Major', 100)
+   Kevin_MacLeod_-_P_I_Tchaikovsky_Dance_of_the_Sugar desktop ('E min', 'Natural Minor', 100)  Android ('E min', 'Natural Minor', 100)
+   Kevin_MacLeod_-_Vibe_Ace.hq.ogg                    desktop ('E maj', 'Major', 17)  Android ('E maj', 'Major', 17)
+   admiralbob77_-_Choice_-_Drum-bass.hq.ogg           desktop ('G maj', 'Major', 9)  Android ('G maj', 'Major', 9)
+   drese-midi.hq.ogg                                  desktop ('G maj', 'Major', 100)  Android ('G maj', 'Major', 100)
+   drese-tempo.hq.ogg                                 desktop ('G maj', 'Major', 100)  Android ('G maj', 'Major', 100)
+   snare-accelerate.hq.ogg                            desktop ('G# maj', 'Major', 75)  Android ('G# maj', 'Major', 75)
+
+Click levels against analysis/test/fixtures/click_levels.json: 32 of 32 agree
+Click render against click_render.py: 36 renders, largest sample difference 0 (16-bit steps)
+
+All within limits.

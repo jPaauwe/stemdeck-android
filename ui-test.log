@@ -1,0 +1,134 @@
+ok   640: beat strip shown for a song with a grid
+ok   640: one tick per beat (46)
+ok   640: one bar mark every 4 beats (12)
+ok   640: one block per section
+ok   640: section names ['Intro', 'Chorus 1', 'Chorus 2']
+ok   640: tapping a section seeks to its start (0:08)
+ok   640: holding a section loops it
+ok   640: the loop starts at the section (0:14)
+ok   640: holding it again ends the loop
+ok   640: click toggles on
+ok   640: click setting saved to the app
+ok   640: clicks scheduled while playing (4)
+ok   640: accent saved
+ok   640: double time selected
+ok   640: a 1-bar count-in with the click off (3 clicks)
+ok   640: beat grid summary
+ok   640: ZIP asks for the active stems (['/api/jobs/a1b2c3d4e5f6/stems/all.zip?stems=drums%2Cbass%2Cvocals'])
+ok   640: mix export carries the click options
+ok   640: one row per LRC line
+ok   640: tapping a line highlights it
+ok   640: tapping a line seeks to it (0:05)
+ok   640: the highlight follows the playhead (line 3 at 0:07)
+ok   640: the current line's words are wiped ('44.2%')
+ok   640: the timing offset is saved ([0.5])
+ok   640: other versions offered
+ok   640: no click controls without a grid
+ok   640: says why there is no grid
+ok   640: search prefilled from the tags
+ok   640: says the lookup is off
+ok   640: lyrics lookup off by default
+ok   640: lyrics lookup turned on in Settings
+ok   640: the lookup sends the edited artist and title ([{'artist': 'Old Band', 'title': 'Old Song (Remix)'}])
+ok   640: split lanes replace Vocals (['drums', 'bass', 'lead_vocals', 'backing_vocals'])
+ok   640: first-download note on Extract
+ok   640: a sections choice left on is switched off at start
+ok   640: sections off by default
+ok   640: sections toggle on
+ok   640: sections choice saved to the app
+ok   640: section model download mentioned
+ok   640: Lead + Backing selectable
+ok   640: vocal split model download mentioned
+ok   640: Extract button above the mini player (439 <= 508)
+ok   640: no script errors []
+ok   640: no requests leave the phone []
+ok   740: beat strip shown for a song with a grid
+ok   740: one tick per beat (46)
+ok   740: one bar mark every 4 beats (12)
+ok   740: one block per section
+ok   740: section names ['Intro', 'Chorus 1', 'Chorus 2']
+ok   740: tapping a section seeks to its start (0:08)
+ok   740: holding a section loops it
+ok   740: the loop starts at the section (0:14)
+ok   740: holding it again ends the loop
+ok   740: click toggles on
+ok   740: click setting saved to the app
+ok   740: clicks scheduled while playing (7)
+ok   740: accent saved
+ok   740: double time selected
+ok   740: a 1-bar count-in with the click off (3 clicks)
+ok   740: beat grid summary
+ok   740: ZIP asks for the active stems (['/api/jobs/a1b2c3d4e5f6/stems/all.zip?stems=drums%2Cbass%2Cvocals'])
+ok   740: mix export carries the click options
+ok   740: one row per LRC line
+ok   740: tapping a line highlights it
+ok   740: tapping a line seeks to it (0:05)
+ok   740: the highlight follows the playhead (line 3 at 0:07)
+ok   740: the current line's words are wiped ('44.2%')
+ok   740: the timing offset is saved ([0.5, 0.5])
+ok   740: other versions offered
+ok   740: no click controls without a grid
+ok   740: says why there is no grid
+ok   740: search prefilled from the tags
+ok   740: says the lookup is off
+ok   740: lyrics lookup off by default
+ok   740: lyrics lookup turned on in Settings
+ok   740: the lookup sends the edited artist and title ([{'artist': 'Old Band', 'title': 'Old Song (Remix)'}])
+ok   740: split lanes replace Vocals (['drums', 'bass', 'lead_vocals', 'backing_vocals'])
+ok   740: first-download note on Extract
+ok   740: a sections choice left on is switched off at start
+ok   740: sections off by default
+ok   740: sections toggle on
+ok   740: sections choice saved to the app
+ok   740: section model download mentioned
+ok   740: Lead + Backing selectable
+ok   740: vocal split model download mentioned
+ok   740: Extract button above the mini player (539 <= 608)
+ok   740: no script errors []
+ok   740: no requests leave the phone []
+ok   832: beat strip shown for a song with a grid
+ok   832: one tick per beat (46)
+ok   832: one bar mark every 4 beats (12)
+ok   832: one block per section
+ok   832: section names ['Intro', 'Chorus 1', 'Chorus 2']
+ok   832: tapping a section seeks to its start (0:08)
+ok   832: holding a section loops it
+ok   832: the loop starts at the section (0:14)
+ok   832: holding it again ends the loop
+ok   832: click toggles on
+ok   832: click setting saved to the app
+ok   832: clicks scheduled while playing (7)
+ok   832: accent saved
+ok   832: double time selected
+ok   832: a 1-bar count-in with the click off (3 clicks)
+ok   832: beat grid summary
+ok   832: ZIP asks for the active stems (['/api/jobs/a1b2c3d4e5f6/stems/all.zip?stems=drums%2Cbass%2Cvocals'])
+ok   832: mix export carries the click options
+ok   832: one row per LRC line
+ok   832: tapping a line highlights it
+ok   832: tapping a line seeks to it (0:05)
+ok   832: the highlight follows the playhead (line 3 at 0:07)
+ok   832: the current line's words are wiped ('44.2%')
+ok   832: the timing offset is saved ([0.5, 0.5, 0.5])
+ok   832: other versions offered
+ok   832: no click controls without a grid
+ok   832: says why there is no grid
+ok   832: search prefilled from the tags
+ok   832: says the lookup is off
+ok   832: lyrics lookup off by default
+ok   832: lyrics lookup turned on in Settings
+ok   832: the lookup sends the edited artist and title ([{'artist': 'Old Band', 'title': 'Old Song (Remix)'}])
+ok   832: split lanes replace Vocals (['drums', 'bass', 'lead_vocals', 'backing_vocals'])
+ok   832: first-download note on Extract
+ok   832: a sections choice left on is switched off at start
+ok   832: sections off by default
+ok   832: sections toggle on
+ok   832: sections choice saved to the app
+ok   832: section model download mentioned
+ok   832: Lead + Backing selectable
+ok   832: vocal split model download mentioned
+ok   832: Extract button above the mini player (631 <= 700)
+ok   832: no script errors []
+ok   832: no requests leave the phone []
+
+All UI checks passed.
