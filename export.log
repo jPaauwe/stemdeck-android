@@ -1,0 +1,10 @@
+  b = len(x)
+  q, k, v = rearrange(
+  assert rot_dim <= t.shape[-1], f'feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}'
+  beat, downbeat = rearrange(beat_downbeat, "b t c -> c b t", c=2)
+[0;93m2026-10-20 10:07:40.889585309 [W:onnxruntime:Default, device_discovery.cc:146 GetPciBusId] Skipping pci_bus_id for PCI path at "/sys/devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/5620e0c7-8062-4dce-aeb7-520c7ef76171" because filename "5620e0c7-8062-4dce-aeb7-520c7ef76171" did not match expected pattern of [0-9a-f]+:[0-9a-f]+:[0-9a-f]+[.][0-9a-f]+[m
+  beat_this 1500 frames: ONNX vs PyTorch max |diff| 2.86e-06
+  beat_this 1000 frames: ONNX vs PyTorch max |diff| 2.26e-06
+  beat_this 300 frames: ONNX vs PyTorch max |diff| 2.38e-06
+  beat_this 37 frames: ONNX vs PyTorch max |diff| 1.55e-06
+beat_this_final0.onnx: 82098874 bytes, sha256 94553b89d3d8eb5dbdbaea796583df6a6e6340b8b5488d48b04143a4c10d9729 (matches models.json)
