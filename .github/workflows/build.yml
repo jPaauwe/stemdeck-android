@@ -271,6 +271,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          # Chaquopy (link import) compiles the app's Python with the same version.
+          python-version: '3.13'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
