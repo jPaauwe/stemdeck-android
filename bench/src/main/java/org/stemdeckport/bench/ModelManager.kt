@@ -26,7 +26,7 @@ class ModelManager(
         fun beatThis(context: Context) = ModelManager(
             context, "beat_this_final0.onnx",
             "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/beat_this_final0.onnx",
-            "80d04915143f9fcef27223dfe03cd4569bf5c7c9ff4cd7a34918e4b1424c682c",
+            "94553b89d3d8eb5dbdbaea796583df6a6e6340b8b5488d48b04143a4c10d9729",
         )
     }
 

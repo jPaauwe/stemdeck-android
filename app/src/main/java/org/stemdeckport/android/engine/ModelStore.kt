@@ -38,8 +38,8 @@ object Models {
     val BEAT_THIS = ModelSpec(
         fileName = "beat_this_final0.onnx",
         url = "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/beat_this_final0.onnx",
-        sha256 = "80d04915143f9fcef27223dfe03cd4569bf5c7c9ff4cd7a34918e4b1424c682c",
-        bytes = 82_001_399,
+        sha256 = "94553b89d3d8eb5dbdbaea796583df6a6e6340b8b5488d48b04143a4c10d9729",
+        bytes = 82_098_874,
         label = "the beat model",
     )
 }

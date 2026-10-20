@@ -61,7 +61,10 @@ def export_beat_this(ckpt: str, out: Path) -> None:
         w, (torch.randn(1, 1500, 128),), str(out),
         input_names=["spect"], output_names=["beat", "downbeat"],
         dynamic_axes={"spect": {1: "frames"}, "beat": {1: "frames"}, "downbeat": {1: "frames"}},
-        opset_version=17, do_constant_folding=True, dynamo=False,
+        # No constant folding: folding computes constants with this machine's
+        # torch kernels (AVX2 vs AVX-512 differ in the last bits), which made
+        # the file's bytes depend on the CPU it was exported on.
+        opset_version=17, do_constant_folding=False, dynamo=False,
     )
     import onnxruntime as ort
 

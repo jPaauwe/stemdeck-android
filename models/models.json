@@ -1,7 +1,7 @@
 {
   "beat_this_final0.onnx": {
-    "bytes": 82001399,
-    "sha256": "80d04915143f9fcef27223dfe03cd4569bf5c7c9ff4cd7a34918e4b1424c682c",
+    "bytes": 82098874,
+    "sha256": "94553b89d3d8eb5dbdbaea796583df6a6e6340b8b5488d48b04143a4c10d9729",
     "source": "Beat This! final0 checkpoint (github.com/CPJKU/beat_this, MIT), exported by scripts/export_models.py",
     "release": "models-1"
   }
