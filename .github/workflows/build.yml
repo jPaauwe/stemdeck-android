@@ -275,7 +275,9 @@ jobs:
       - name: Native libraries are 16 KB aligned; APK size
         run: |
           set -o pipefail
-          python3 scripts/check_apk.py app/build/outputs/apk/release/app-release.apk | tee apk-check.log
+          for abi in arm64-v8a x86_64; do
+            python3 scripts/check_apk.py app/build/outputs/apk/release/app-$abi-release.apk | tee -a apk-check.log
+          done
       - name: Publish logs to a ci-logs branch
         if: always()
         env:
@@ -283,14 +285,21 @@ jobs:
         run: scripts/ci_logs.sh ${{ github.job }} ${{ github.run_id }} ${{ github.sha }} ${{ job.status == 'failure' }}
       - name: Rename
         run: |
-          cp app/build/outputs/apk/release/app-release.apk StemDeck-Android.apk
+          cp app/build/outputs/apk/release/app-arm64-v8a-release.apk StemDeck-Android.apk
+          cp app/build/outputs/apk/release/app-x86_64-release.apk StemDeck-Android-x86_64.apk
           cp bench/build/outputs/apk/release/bench-release.apk StemDeck-Bench.apk
           cp compare/build/outputs/apk/release/compare-release.apk StemDeck-Compare.apk
+      - name: The APKs on a branch too, for testing a pull request on a phone or emulator
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci_logs.sh apk-files ${{ github.run_id }} ${{ github.sha }} false StemDeck-Android.apk StemDeck-Android-x86_64.apk
       - uses: actions/upload-artifact@v4
         with:
           name: StemDeck-Android
           path: |
             StemDeck-Android.apk
+            StemDeck-Android-x86_64.apk
             StemDeck-Bench.apk
             StemDeck-Compare.apk
 
@@ -325,9 +334,9 @@ jobs:
           else
             # Development builds, with the benchmark apps.
             tag="build-${{ github.run_number }}"
-            gh release create "$tag" StemDeck-Android.apk StemDeck-Bench.apk StemDeck-Compare.apk \
+            gh release create "$tag" StemDeck-Android.apk StemDeck-Android-x86_64.apk StemDeck-Bench.apk StemDeck-Compare.apk \
               --repo "${{ github.repository }}" \
               --title "StemDeck for Android, development build ${{ github.run_number }}" \
-              --notes "Development build from ${{ github.sha }}. StemDeck-Android.apk is the app; StemDeck-Bench.apk benchmarks the separation engine; StemDeck-Compare.apk runs a song through several engine builds and compares them." \
+              --notes "Development build from ${{ github.sha }}. StemDeck-Android.apk is the app (arm64 phones; StemDeck-Android-x86_64.apk for the emulator); StemDeck-Bench.apk benchmarks the separation engine; StemDeck-Compare.apk runs a song through several engine builds and compares them." \
               --prerelease
           fi

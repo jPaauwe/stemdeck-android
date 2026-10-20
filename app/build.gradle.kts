@@ -81,8 +81,19 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+    // One APK per ABI, native libraries compressed: ONNX Runtime alone is
+    // 34 MB (arm64) and 41 MB (x86_64) uncompressed, which made a single
+    // APK 87 MB. Phones get the arm64 APK; the x86_64 one is for the emulator.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
+    }
     packaging {
-        jniLibs { useLegacyPackaging = false }
+        jniLibs { useLegacyPackaging = true }
     }
 }
 
