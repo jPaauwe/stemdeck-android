@@ -51,6 +51,13 @@ used.
    relative to the song's length, peak memory and the phone's thermal
    state.
 
+3. **The analysis after separation** (app 1.1), on the test song's stems:
+   the beat grid (Beat This! on ONNX Runtime, then desktop's clean-up) with
+   the CPU provider at the default, 2, 4, 6 and 8 threads, XNNPACK and
+   NNAPI, each with its time, the share spent in the model, peak memory and
+   whether the beats match the first run; then the key from the stems. The
+   first run downloads the beat model (82 MB).
+
 The report starts with the phone model, chip, Android version, core count and
 RAM, so results from different phones can be told apart.
 

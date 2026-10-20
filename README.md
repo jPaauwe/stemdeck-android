@@ -2,8 +2,9 @@
 
 [StemDeck](https://github.com/stemdeckapp/stemdeck) on your phone, with the
 separation running **on the phone itself**: import a song, get vocals, drums,
-bass, guitar, piano and other on their own lanes, and practice with them.
-No computer, no account, nothing uploaded.
+bass, guitar, piano and other on their own lanes, and practice with them,
+with the song's beat grid, key and a click track.
+No computer, no account, nothing uploaded (see [Privacy](#privacy)).
 
 This is a personal, unofficial port. It is not made or supported by the
 StemDeck project.
@@ -32,9 +33,20 @@ the same key, so a new APK installs over the old one and keeps your library.
   *Extract stems*. Or, from the Files app or a download, **Share → StemDeck**.
 - Separation runs in the background with a notification (tap *Cancel* there to
   stop). The screen can be off.
-- **Mixer**: mute, solo and volume per stem, speed and key, seek. **Analysis**:
-  loudness, peak, dynamic range and how present each stem is.
-  *Export mix* saves what you hear to `Download/StemDeck/`.
+- **Mixer**: mute, solo and volume per stem, speed and key, seek. Under the
+  waveform, the song's beats and bar lines. **Click**: a metronome on the
+  detected beats, in time with the song at any speed, with volume, accent
+  (auto from the detected bars, off, or a fixed meter), half or double time
+  and a count-in of 1 to 4 bars.
+- **Analysis**: loudness, peak, dynamic range, how present each stem is, the
+  key (with how sure it is), the tempo and the beat grid.
+  *Export mix* saves what you hear to `Download/StemDeck/`, with the click
+  track if you tick *Include the click track*. *Export stems (ZIP)* saves the
+  stems that are on in the Mixer, as they are stored, in one ZIP.
+- After separating, the app finds the beat grid on the drums stem and the
+  key from the guitar, piano, other, vocals and bass stems, the way desktop
+  StemDeck does. The first song downloads the beat model once (82 MB). If a
+  song has no grid (too few beats, say) the Analysis tab says why.
 - Stems are **320 kbps MP3** files by default (about 2.4 MB a minute each).
   Choose **WAV** under *File format* on the Extract screen for lossless 16-bit
   stems (about 10 MB a minute each). The choice is remembered, applies to new
@@ -54,12 +66,38 @@ the same key, so a new APK installs over the old one and keeps your library.
 | FFmpeg decode | Android's built-in decoders (`AudioDecoder.kt`) and a windowed-sinc resampler to 44.1 kHz |
 | Mobile web UI (`static/mobile`) | The same UI, bundled in `app/src/main/assets/web` and shown in a WebView. Changes are marked `Android:` |
 | pyloudnorm | The same BS.1770 K-weighting and gating in C++ |
+| Beat grid: Beat This! (PyTorch) + `beatgrid.py` (librosa, numpy) | Beat This! exported to ONNX and run with ONNX Runtime; its log-mel front end, ffmpeg's downmix and resampler, and the clean-up ported to C++ (`analysis/`) |
+| Key: `analyze.py` (librosa `chroma_cqt`) | The constant-Q chroma, tuning estimate and key logic ported to C++ (`analysis/`) |
+| Click track: `metronome.js` / `click_render.py` | `metronome.js` unchanged in the WebView; the renderer ported to C++ for *Export mix* |
 
 The engine separates the song the way PyTorch Demucs does: normalized with
 the whole song's statistics, cut into Demucs' own 7.8-second segments with a
 25% overlap and a time shift, and blended back with triangular weights. The
 segments are spread over a few worker threads (1 to 3, depending on the
 phone's memory), so memory stays flat however long the song is.
+
+The analysis stages are checked against desktop StemDeck's own Python on
+every push (`scripts/analysis_parity.py` in CI): the beat grid gives the same
+beats and bars on synthetic bands, click tracks and recordings (fast and
+rubato ones included); the key agrees on all 33 songs of desktop's labelled
+key set and on the recordings; the click renders are sample for sample the
+same, and the JavaScript scheduler matches desktop's shared fixture. The
+details are in [`analysis/README.md`](analysis/README.md).
+
+## Privacy
+
+Separation and analysis happen on the phone; nothing you import is uploaded,
+and there is no account. The app goes online only to download its model
+files, each once, the first time a feature needs it, and checks each against
+a pinned SHA-256:
+
+- the separation model (55 MB) from Hugging Face
+  (`huggingface.co/datasets/Retrobear/demucs.cpp`),
+- the beat model (82 MB) from this repository's `models-1` release on GitHub.
+
+Those requests carry nothing about you or your songs. The interface's fonts
+are bundled with the app, so opening it contacts nobody. ONNX Runtime's
+telemetry is switched off.
 
 ## Speed
 
@@ -108,9 +146,8 @@ both:
 
 ## Not yet on Android
 
-Planned for later stages: key and BPM detection, click track and beat grid,
-YouTube/SoundCloud links, lyrics, the lead/backing vocal split, sections,
-exporting every stem as a zip.
+Planned for later stages: YouTube/SoundCloud links, lyrics, the
+lead/backing vocal split, sections.
 
 ## Building yourself
 
@@ -146,6 +183,18 @@ installs them on first sync). StemDeck Compare also needs Python 3.
 - Demucs ([adefossez/demucs](https://github.com/adefossez/demucs)) and the
   `htdemucs_6s` weights: MIT, © Meta Platforms.
 - Eigen: MPL 2.0. NanoHTTPD: BSD 3-Clause.
+- [Beat This!](https://github.com/CPJKU/beat_this) (CPJKU, Johannes Kepler
+  University Linz), code and the `final0` weights: MIT. The app downloads an
+  ONNX export of the published checkpoint, made reproducibly by
+  `scripts/export_models.py` (`models/models.json`).
+- [ONNX Runtime](https://github.com/microsoft/onnxruntime) 1.31.0: MIT
+  (`analysis/third_party/onnxruntime`).
+- The analysis ports in `analysis/` follow desktop StemDeck's Python
+  (Apache 2.0) and the parts of [librosa](https://librosa.org) (ISC),
+  numpy (BSD), torchaudio (BSD) and FFmpeg's resampler they call; the code is
+  written for this app, and FFmpeg's is not used.
+- Space Grotesk and JetBrains Mono (the interface's fonts): SIL Open Font
+  License 1.1 (`assets/web/fonts`).
 - [LAME](https://lame.sourceforge.io) 3.100, the MP3 encoder and decoder:
   LGPL 2.0 or later. It is not stored in this repository: the build downloads
   the release tarball, checks its SHA1 (`app/src/main/cpp/lame/CMakeLists.txt`)

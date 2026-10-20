@@ -1,19 +1,24 @@
-StemDeck for Android: [StemDeck](https://github.com/stemdeckapp/stemdeck) on your phone, with the stem separation running **on the phone itself**. Nothing is uploaded, and there's no account.
+StemDeck for Android 1.1: the song's beat grid, key and a click track, worked out on the phone the way desktop StemDeck does it, and every stem in one ZIP.
 
 This is an unofficial port. It is not made or supported by the StemDeck project.
 
-**Install:** tap `StemDeck-Android.apk` below on your phone, and allow your browser to install apps when Android asks. Requires Android 10 or newer on a 64-bit phone. The first separation downloads the separation model once (about 55 MB).
+**Install:** tap `StemDeck-Android.apk` below on your phone, and allow your browser to install apps when Android asks. It installs over 1.0 and keeps your library. Requires Android 10 or newer on a 64-bit phone.
 
-### What it does
-- **Separates a song into six stems**: vocals, drums, bass, guitar, piano and other. It uses Demucs' `htdemucs_6s` model, the same one desktop StemDeck uses. Import a file on the Extract screen, or share one to StemDeck from another app.
-- **Separates on the phone**, in the background, with a notification you can cancel from. The engine uses every core and, where the phone supports it, the GPU (Vulkan), falling back to the CPU on its own. You can choose *CPU only* under *Processing*.
-- **Saves stems as 320 kbps MP3** by default (gapless, so the stems stay in sync), or as lossless WAV under *File format*.
-- **Mixer:** mute, solo and volume per stem, plus speed, key and seeking. **Analysis:** loudness, peak, dynamic range and how present each stem is. **Export mix** saves what you hear to `Download/StemDeck`.
+### New
+- **Beat grid and tempo.** After separating, the app finds the beats and bar lines on the drums stem with Beat This!, the model desktop StemDeck uses, then cleans the grid up exactly as desktop does. The Mixer shows the beats under the waveform; Analysis shows the tempo and how many beats land on a drum hit. The first song downloads the beat model once (82 MB).
+- **Key.** Found from the guitar, piano, other, vocals and bass stems with desktop's method (constant-Q chroma, its key profiles and its relative-key rules), with how sure it is.
+- **Click track.** A metronome on the detected beats in the Mixer: on/off, volume, accent (auto from the bars, off or a fixed meter), half or double time, and a count-in. It stays in time at any speed. *Export mix* can include it.
+- **Export stems (ZIP).** The stems that are on in the Mixer, in one ZIP, stored as they are.
 
-### Fixed since the development builds
-- The *Extract stems* button is no longer covered by the mini player while a track is playing.
+### Same as desktop
+Checked against desktop StemDeck's Python on every build: the same beats and bars on test songs (fast, slow and rubato), the same key on desktop's whole 33-song key set, and click renders that match sample for sample.
+
+### Privacy
+The app downloads its models (separation 55 MB, beat 82 MB) once each; nothing you import leaves the phone. The fonts are now part of the app, so opening it no longer contacts Google Fonts.
 
 ### Not yet on Android
-Key and BPM detection, click track and beat grid, YouTube/SoundCloud links, lyrics, the lead/backing vocal split, sections, and exporting every stem as a zip.
+YouTube/SoundCloud links, lyrics, the lead/backing vocal split and sections.
+
+Songs separated with 1.0 have no beat grid or key; separate them again to get them.
 
 Only use this app with audio you have the right to use.
