@@ -1,0 +1,24 @@
+load_demucs_model: loading model
+Loading model_file... 
+Checking the magic of model_file
+Model magic is Demucs 6-source
+Loading demucs model... 
+Loading weights from model_file
+4 cores, GPU: llvmpipe (LLVM 20.1.2, 256 bits) (Vulkan 1.4)
+Loaded model (525 tensors,  52.29 MB) in 0.118273 s
+{"seconds": 45.4, "rms": {"drums": 0.037505, "bass": 0.106056, "other": 0.029899, "vocals": 0.056080, "guitar": 0.000757, "piano": 0.000764}}
+load_demucs_model: loading model
+Loading model_file... 
+Checking the magic of model_file
+Model magic is Demucs 6-source
+Loading demucs model... 
+Loading weights from model_file
+4 cores, GPU switched off
+Loaded model (525 tensors,  52.29 MB) in 0.116465 s
+{"seconds": 24.2, "rms": {"drums": 0.037505, "bass": 0.106056, "other": 0.029899, "vocals": 0.056080, "guitar": 0.000757, "piano": 0.000764}}
+drums: GPU vs CPU 98.1 dB
+bass: GPU vs CPU 104.7 dB
+other: GPU vs CPU 93.0 dB
+vocals: GPU vs CPU 99.2 dB
+guitar: GPU vs CPU 67.8 dB
+piano: GPU vs CPU 68.3 dB

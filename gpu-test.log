@@ -1,0 +1,13 @@
+GPU: llvmpipe (LLVM 20.1.2, 256 bits) (Vulkan 1.4)
+gemm NN M=64 N=64 K=16 alpha=1.00 beta=0.00: rel err 0.00e+00, 0.1 ms  ok
+gemm NN M=100 N=37 K=53 alpha=1.00 beta=0.00: rel err 1.02e-07, 0.2 ms  ok
+gemm NT M=2688 N=384 K=384 alpha=1.00 beta=0.00: rel err 0.00e+00, 62.1 ms  ok
+gemm TN M=300 N=48 K=280 alpha=1.00 beta=0.00: rel err 3.57e-07, 1.2 ms  ok
+gemm NT M=280 N=300 K=48 alpha=1.00 beta=0.00: rel err 0.00e+00, 1.1 ms  ok
+gemm TT M=65 N=129 K=77 alpha=0.50 beta=0.25: rel err 1.28e-07, 0.4 ms  ok
+gemm NN M=48 N=20000 K=48 alpha=1.00 beta=1.00: rel err 0.00e+00, 13.8 ms  ok
+gemm NN M=1 N=1 K=1 alpha=1.00 beta=0.00: rel err 0.00e+00, 0.2 ms  ok
+gemm NN M=192 N=4000 K=96 alpha=1.00 beta=1.00: rel err 0.00e+00, 14.9 ms  ok
+attention T=300 S=280 C=384 heads=8: rel err 6.28e-07, GPU 52 ms, CPU 3 ms  ok
+attention T=2688 S=2688 C=384 heads=8: rel err 3.02e-06, GPU 1395 ms, CPU 206 ms  ok
+all ok

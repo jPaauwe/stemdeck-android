@@ -1,0 +1,44 @@
+$ build/engine/sdengine_cli prepare build/engine-test/raw.f32 48000 2 build/engine-test/prepared.f32
+   11%  Resampling
+   21%  Resampling
+   31%  Resampling
+   41%  Resampling
+   51%  Resampling
+   61%  Resampling
+   71%  Resampling
+   80%  Resampling
+   90%  Resampling
+$ build/engine/sdengine_cli analyze build/engine-test/prepared.f32
+LUFS engine -16.96  pyloudnorm -16.96
+$ /usr/bin/time -f %M -o build/engine-test/chunked.rss build/engine/sdengine_cli separate model/htdemucs-6s.bin build/engine-test/prepared.f32 build/engine-test/chunked 3 10
+load_demucs_model: loading model
+4 cores, GPU not used: no suitable GPU
+   12%  Separating stems
+   25%  Separating stems
+   37%  Separating stems
+   50%  Separating stems
+   62%  Separating stems
+   75%  Separating stems
+   87%  Separating stems
+  100%  Separating stems
+chunked: 3 thread(s), 46.0 s for 45 s of audio (1.0x real time), peak RSS 2059 MB
+$ /usr/bin/time -f %M -o build/engine-test/single.rss build/engine/sdengine_cli separate model/htdemucs-6s.bin build/engine-test/prepared.f32 build/engine-test/single 1 1000
+load_demucs_model: loading model
+4 cores, GPU not used: no suitable GPU
+   12%  Separating stems
+   25%  Separating stems
+   37%  Separating stems
+   50%  Separating stems
+   62%  Separating stems
+   75%  Separating stems
+   87%  Separating stems
+  100%  Separating stems
+single: 1 thread(s), 62.8 s for 45 s of audio (1.4x real time), peak RSS 951 MB
+stems sum vs mix SNR: 22.3 dB
+  drums   chunked vs single: difference 172.5 dB below the mix (stem level -24 dB)
+  bass    chunked vs single: difference 172.5 dB below the mix (stem level -15 dB)
+  other   chunked vs single: difference 172.5 dB below the mix (stem level -29 dB)
+  vocals  chunked vs single: difference 172.5 dB below the mix (stem level -21 dB)
+  guitar  chunked vs single: difference 172.5 dB below the mix (stem level -58 dB)
+  piano   chunked vs single: difference 172.5 dB below the mix (stem level -58 dB)
+engine OK
