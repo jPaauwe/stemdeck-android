@@ -90,7 +90,9 @@ class JobStore(val root: File) {
     }
 
     /** Creates a queued job; [input] is moved into the job's folder. */
-    fun create(title: String, sourceUrl: String, selected: List<String>, input: File, format: String): Job {
+    fun create(
+        title: String, sourceUrl: String, selected: List<String>, input: File, format: String, autoSections: Boolean = false,
+    ): Job {
         val id = newId()
         val work = workDir(id).apply { mkdirs() }
         stemsDir(id).mkdirs()
@@ -102,6 +104,23 @@ class JobStore(val root: File) {
         }
         val job = Job(id, title, sourceUrl, selected, System.currentTimeMillis() / 1000.0)
         job.format = if (format == "mp3") "mp3" else "wav"
+        job.autoSections = autoSections
+        synchronized(lock) {
+            jobs[id] = job
+            persist(job)
+            lock.notifyAll()
+        }
+        return job
+    }
+
+    /** A queued job for a link (1.4): no input file yet, the service downloads it first. */
+    fun createFromUrl(title: String, url: String, selected: List<String>, format: String, autoSections: Boolean): Job {
+        val id = newId()
+        workDir(id).mkdirs()
+        stemsDir(id).mkdirs()
+        val job = Job(id, title, url, selected, System.currentTimeMillis() / 1000.0)
+        job.format = if (format == "mp3") "mp3" else "wav"
+        job.autoSections = autoSections
         synchronized(lock) {
             jobs[id] = job
             persist(job)
@@ -157,6 +176,7 @@ class JobStore(val root: File) {
 
     fun requestStop(id: String, terminal: String) {
         val job = get(id) ?: return
+        if (job.finished && job.vocalSplit != "running") return
         if (job.status == "queued") {
             update(id) { it.status = terminal; it.stage = terminal.replaceFirstChar(Char::uppercase) }
             return
@@ -165,11 +185,45 @@ class JobStore(val root: File) {
         onStopRequested?.invoke(id)
     }
 
+    // Android 1.2: lead/backing vocal splits waiting for the service, in order.
+    private val splitQueue = ArrayDeque<String>()
+
+    /** Queues desktop's on-demand vocal split for a done song; false if it is already running. */
+    fun queueSplit(id: String): Boolean {
+        synchronized(lock) {
+            val job = jobs[id] ?: return false
+            if (job.vocalSplit == "running") return false
+            splitQueue.addLast(id)
+        }
+        update(id) {
+            it.vocalSplit = "running"
+            it.stage = "Splitting lead/backing vocals..."
+            it.progress = 0.0
+        }
+        return true
+    }
+
+    fun nextSplit(): String? = synchronized(lock) { splitQueue.removeFirstOrNull() }
+
+    fun hasSplits(): Boolean = synchronized(lock) { splitQueue.isNotEmpty() }
+
+    /** Waits until [id]'s vocal split is no longer running. */
+    fun awaitSplit(id: String): Job? {
+        synchronized(lock) {
+            while (true) {
+                val job = jobs[id] ?: return null
+                if (job.vocalSplit != "running") return job
+                lock.wait(1000)
+            }
+        }
+    }
+
     fun stopRequested(id: String): String? = synchronized(lock) { stopRequests[id] }
     fun clearStop(id: String) = synchronized(lock) { stopRequests.remove(id) }
 
     fun runningJob(): Job? = synchronized(lock) {
         jobs.values.firstOrNull { !it.finished && it.status != "queued" }
+            ?: jobs.values.firstOrNull { it.vocalSplit == "running" }
     }
 
     private fun persist(job: Job) {

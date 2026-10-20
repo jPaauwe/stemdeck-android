@@ -42,6 +42,83 @@ object Models {
         bytes = 82_098_874,
         label = "the beat model",
     )
+
+    /**
+     * UVR-MDX-NET Karaoke 2 (Ultimate Vocal Remover, MIT with credit to UVR),
+     * the lead/backing vocal split model desktop downloads through
+     * audio-separator, from the same UVR model repository release.
+     */
+    val KARAOKE = ModelSpec(
+        fileName = "UVR_MDXNET_KARA_2.onnx",
+        url = "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_KARA_2.onnx",
+        sha256 = "bf32e15105a09c0f7dddd2b67346146334d6f3ecb399ed7638eba2ab07cbf5f4",
+        bytes = 52_786_726,
+        label = "the vocal split model",
+    )
+
+    /**
+     * All-In-One harmonix-all (Kim & Nam, MIT), the eight folds desktop
+     * averages, each exported to ONNX from its checkpoint and checked against
+     * PyTorch by scripts/export_models.py (models/models.json). 25 MB in all.
+     */
+    val SECTIONS: List<ModelSpec> = listOf(
+        ModelSpec(
+            fileName = "allinone_harmonix_fold0.onnx",
+            url = "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold0.onnx",
+            sha256 = "166d10540f9434693ff4d6bc43caddbed4ed3bd74f5d28fd5953091d80fcdc0c",
+            bytes = 3_318_773,
+            label = "the section model",
+        ),
+        ModelSpec(
+            fileName = "allinone_harmonix_fold1.onnx",
+            url = "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold1.onnx",
+            sha256 = "ecaf4168d24bb0646ce998c6b78dd278cf66343477062fbff585c3806e588b38",
+            bytes = 3_318_773,
+            label = "the section model",
+        ),
+        ModelSpec(
+            fileName = "allinone_harmonix_fold2.onnx",
+            url = "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold2.onnx",
+            sha256 = "e0ba4f73c4bfb29bc77734ea3d235a16fdd176c2bded0c89453d916ccfcde0fe",
+            bytes = 3_318_773,
+            label = "the section model",
+        ),
+        ModelSpec(
+            fileName = "allinone_harmonix_fold3.onnx",
+            url = "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold3.onnx",
+            sha256 = "05f6b178686c4c02016bea3c0deafb0764ebc876d2b4efca17773fd305150a52",
+            bytes = 3_318_773,
+            label = "the section model",
+        ),
+        ModelSpec(
+            fileName = "allinone_harmonix_fold4.onnx",
+            url = "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold4.onnx",
+            sha256 = "f388d6dc941b15ad3b0b4fad2e7dd17dc995cf5b3f21026b6cf050816e12038c",
+            bytes = 3_318_773,
+            label = "the section model",
+        ),
+        ModelSpec(
+            fileName = "allinone_harmonix_fold5.onnx",
+            url = "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold5.onnx",
+            sha256 = "f504003328f58ab5c89874c6e5c65ab07e2a213bbd672b7cc39f1ac29be34012",
+            bytes = 3_318_773,
+            label = "the section model",
+        ),
+        ModelSpec(
+            fileName = "allinone_harmonix_fold6.onnx",
+            url = "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold6.onnx",
+            sha256 = "d19b5c4085c321d51762ab6cb8d29c24ee2acca079919b82030c944db3f262b3",
+            bytes = 3_318_773,
+            label = "the section model",
+        ),
+        ModelSpec(
+            fileName = "allinone_harmonix_fold7.onnx",
+            url = "https://github.com/jPaauwe/stemdeck-android/releases/download/models-1/allinone_harmonix_fold7.onnx",
+            sha256 = "58581305f8af98ff25e68935225fa4ef12dc5b3e8770bf5fba7e2ac374072802",
+            bytes = 3_318_773,
+            label = "the section model",
+        ),
+    )
 }
 
 /**
@@ -64,6 +141,19 @@ class ModelStore(private val dir: File) {
      * file is kept so the next attempt resumes).
      */
     @Throws(IOException::class)
+    fun isReady(specs: List<ModelSpec>): Boolean = specs.all { isReady(it) }
+
+    /** [ensure] for several files, with one progress over their total size. */
+    fun ensureAll(specs: List<ModelSpec>, onProgress: (Float) -> Boolean): List<File> {
+        val total = specs.sumOf { it.bytes }.toFloat()
+        var before = 0L
+        return specs.map { spec ->
+            val f = ensure(spec) { p -> onProgress((before + p * spec.bytes) / total) }
+            before += spec.bytes
+            f
+        }
+    }
+
     fun ensure(spec: ModelSpec, onProgress: (Float) -> Boolean): File {
         val target = file(spec)
         if (isReady(spec)) return target

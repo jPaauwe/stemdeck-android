@@ -41,6 +41,22 @@ class Job(
     var tempoStability: Int? = null
     /** Why an analysis stage produced nothing, by stage ("beats", "key"). Android only. */
     var analysisNotes: Map<String, String> = emptyMap()
+    /** Android 1.2: automatic song sections, desktop's {id, name, kind, start, end, color} list. */
+    var sections: JSONArray? = null
+    /** "automatic" (or desktop's "manual", once editing exists). */
+    var sectionsSource: String? = null
+    /** Whether the sections stage runs for this song, chosen at import (desktop's auto_sections). */
+    var autoSections: Boolean = false
+    /** The link's thumbnail (1.4), as desktop's thumbnail. */
+    var thumbnail: String? = null
+    /** Android 1.3: lyrics kept beside the song (lyrics.json), as desktop's has_lyrics. */
+    var hasLyrics: Boolean = false
+    /** The file's own tags (title, artist, album), as desktop's audio_tags. */
+    var audioTags: Map<String, String> = emptyMap()
+    /** Artist/title/album the user typed in the Lyrics tab, used for lookups instead of the tags. */
+    var lyricsQuery: JSONObject? = null
+    /** Desktop's on-demand lead/backing split: "none", "running", "done" or "error". */
+    var vocalSplit: String = "none"
     /** Seconds per stage, as desktop records them (#293). */
     var stageTimings: Map<String, Double> = emptyMap()
 
@@ -58,7 +74,7 @@ class Job(
         put("stage", stage)
         put("title", title)
         put("duration", duration ?: JSONObject.NULL)
-        put("thumbnail", JSONObject.NULL)
+        put("thumbnail", thumbnail ?: JSONObject.NULL)
         put("bpm", bpm ?: JSONObject.NULL)
         put("key", key ?: JSONObject.NULL)
         put("scale", scale ?: JSONObject.NULL)
@@ -75,19 +91,25 @@ class Job(
         put("source_url", sourceUrl)
         put("source_format", JSONObject.NULL)
         put("has_video", false)
-        put("has_lyrics", false)
+        put("has_lyrics", hasLyrics)
+        put("audio_tags", JSONObject(audioTags as Map<*, *>))
+        put("lyrics_query", lyricsQuery ?: JSONObject.NULL)
         put("error", error ?: JSONObject.NULL)
         put("compute_device", computeDevice)
         put("trashed_at", trashedAt ?: JSONObject.NULL)
         put("favorite", favorite)
         put("created_at", createdAt)
         put("stem_format", format)
+        put("vocal_split", vocalSplit)
+        put("sections", sections ?: JSONObject.NULL)
+        put("sections_source", sectionsSource ?: JSONObject.NULL)
         put("analysis_notes", JSONObject(analysisNotes as Map<*, *>))
         put("stage_timings", JSONObject(stageTimings as Map<*, *>))
     }
 
     fun toRecord(): JSONObject = toState().apply {
         put("compute_seconds", computeSeconds ?: JSONObject.NULL)
+        put("auto_sections", autoSections)
     }
 
     companion object {
@@ -129,6 +151,17 @@ class Job(
             job.analysisNotes = o.optJSONObject("analysis_notes")?.let { n ->
                 n.keys().asSequence().associateWith { n.getString(it) }
             } ?: emptyMap()
+            job.hasLyrics = o.optBoolean("has_lyrics", false)
+            job.thumbnail = optS("thumbnail")
+            job.audioTags = o.optJSONObject("audio_tags")?.let { t ->
+                t.keys().asSequence().associateWith { t.optString(it) }
+            } ?: emptyMap()
+            job.lyricsQuery = o.optJSONObject("lyrics_query")
+            // A split cut short by the app being closed is not still running.
+            job.vocalSplit = o.optString("vocal_split", "none").let { if (it == "running") "none" else it }
+            job.sections = o.optJSONArray("sections")
+            job.sectionsSource = optS("sections_source")
+            job.autoSections = o.optBoolean("auto_sections", false)
             job.stageTimings = o.optJSONObject("stage_timings")?.let { n ->
                 n.keys().asSequence().associateWith { n.getDouble(it) }
             } ?: emptyMap()

@@ -38,18 +38,47 @@ class Settings(context: Context) {
             prefs.edit().putString(KEY_CLICK, clean.toString()).apply()
         }
 
+    /**
+     * Network (1.3): look up lyrics on LRCLIB, sending only artist, title,
+     * album and length. Off until the user turns it on.
+     */
+    var lyricsLookup: Boolean
+        get() = prefs.getBoolean(KEY_LYRICS, false)
+        set(v) { prefs.edit().putBoolean(KEY_LYRICS, v).apply() }
+
+    /**
+     * Network (1.4): import from YouTube and SoundCloud links with yt-dlp.
+     * Off until the user turns it on.
+     */
+    var linkImport: Boolean
+        get() = prefs.getBoolean(KEY_LINKS, false)
+        set(v) { prefs.edit().putBoolean(KEY_LINKS, v).apply() }
+
+    /**
+     * Find song sections for the next import (desktop's auto_sections). Not
+     * saved: like desktop it starts off every session, because the stage
+     * costs an extra model pass per song and should be asked for each time.
+     */
+    @Volatile var autoSections: Boolean = false
+
     fun toJson(): JSONObject = JSONObject().put("stem_format", stemFormat).put("gpu", gpu).put("click", click)
+        .put("auto_sections", autoSections).put("lyrics_lookup", lyricsLookup).put("link_import", linkImport)
 
     fun apply(o: JSONObject) {
         o.optString("stem_format").takeIf { it.isNotEmpty() }?.let { stemFormat = it }
         if (o.has("gpu")) gpu = o.optBoolean("gpu", true)
         o.optJSONObject("click")?.let { click = it }
+        if (o.has("auto_sections")) autoSections = o.optBoolean("auto_sections", false)
+        if (o.has("lyrics_lookup")) lyricsLookup = o.optBoolean("lyrics_lookup", false)
+        if (o.has("link_import")) linkImport = o.optBoolean("link_import", false)
     }
 
     companion object {
         private const val KEY_FORMAT = "stem_format"
         private const val KEY_GPU = "gpu"
         private const val KEY_CLICK = "click"
+        private const val KEY_LYRICS = "lyrics_lookup"
+        private const val KEY_LINKS = "link_import"
         val FORMATS = setOf("mp3", "wav")
     }
 }

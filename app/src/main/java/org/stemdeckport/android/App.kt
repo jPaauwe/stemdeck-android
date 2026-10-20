@@ -17,6 +17,14 @@ class App : Application() {
         private set
     lateinit var settings: Settings
         private set
+    lateinit var lyrics: org.stemdeckport.android.data.LyricsStore
+        private set
+
+    /** What LRCLIB is told the app is (it asks clients for name, version and homepage). */
+    val userAgent: String by lazy {
+        val v = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { null } ?: "dev"
+        "StemDeck-Android/$v (https://github.com/jPaauwe/stemdeck-android)"
+    }
 
     /** Started on first use, so a process woken only for the service skips it. */
     val server: LocalServer by lazy {
@@ -34,6 +42,7 @@ class App : Application() {
         store = JobStore(File(base, "jobs"))
         models = ModelStore(File(filesDir, "models"))
         settings = Settings(this)
+        lyrics = org.stemdeckport.android.data.LyricsStore(store)
         store.onStopRequested = { NativeEngine.cancel() }
     }
 

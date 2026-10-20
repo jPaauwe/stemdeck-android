@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.chaquo.python")
 }
 
 android {
@@ -18,10 +19,6 @@ android {
 
         externalNativeBuild {
             cmake {
-                // arm64 for phones; x86_64 so it also runs in the emulator.
-                // (The APK splits below pick the same two; Gradle refuses
-                // ndk.abiFilters alongside splits.)
-                abiFilters += listOf("arm64-v8a", "x86_64")
                 arguments += listOf("-DANDROID_STL=c++_shared", "-DCMAKE_BUILD_TYPE=Release")
             }
         }
@@ -84,18 +81,68 @@ android {
     // One APK per ABI, native libraries compressed: ONNX Runtime alone is
     // 34 MB (arm64) and 41 MB (x86_64) uncompressed, which made a single
     // APK 87 MB. Phones get the arm64 APK; the x86_64 one is for the emulator.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = false
-        }
+    // Flavors rather than APK splits, because Chaquopy reads the ABIs from
+    // ndk.abiFilters, which Gradle refuses alongside splits.
+    flavorDimensions += "abi"
+    productFlavors {
+        create("arm64") { dimension = "abi"; ndk { abiFilters += "arm64-v8a" } }
+        create("x86_64") { dimension = "abi"; ndk { abiFilters += "x86_64" } }
     }
     packaging {
         jniLibs { useLegacyPackaging = true }
     }
 }
+
+// Link import (1.4): yt-dlp (Unlicense) and its YouTube challenge solver
+// scripts, yt-dlp-ejs (Unlicense), on Chaquopy's Python. Pinned: yt-dlp 2026.08.19
+// asks for yt-dlp-ejs 0.8.0. The app can update yt-dlp itself from Settings.
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+        pip {
+            install("yt-dlp==2026.8.19")
+            install("yt-dlp-ejs==0.8.0")
+            install("certifi")
+        }
+    }
+}
+
+// QuickJS-NG's qjs, the JavaScript runtime yt-dlp runs for YouTube's
+// challenges, built with the NDK as an executable named libqjs.so so that
+// Android installs it in the native library directory, where an app may run
+// programs (src/main/qjs/CMakeLists.txt).
+val qjsAbis = listOf("arm64-v8a", "x86_64")
+val qjsOut = layout.buildDirectory.dir("qjs/jniLibs")
+val buildQuickJs by tasks.registering {
+    inputs.file("src/main/qjs/CMakeLists.txt")
+    outputs.dir(qjsOut)
+    doLast {
+        val sdk = android.sdkDirectory
+        // The SDK's CMake if it is installed (Android Studio installs it on
+        // first sync; Gradle only fetches it later in a build), else the one
+        // on PATH.
+        val sdkCmake = File(sdk, "cmake/3.22.1/bin/cmake")
+        val cmake = if (sdkCmake.exists()) sdkCmake else File("cmake")
+        val ninja = File(sdk, "cmake/3.22.1/bin/ninja")
+        val generator = if (ninja.exists()) listOf("-G", "Ninja", "-DCMAKE_MAKE_PROGRAM=${ninja.path}")
+            else listOf("-G", "Unix Makefiles")
+        val toolchain = File(android.ndkDirectory, "build/cmake/android.toolchain.cmake")
+        fun run(vararg cmd: String) {
+            val p = ProcessBuilder(*cmd).inheritIO().start()
+            if (p.waitFor() != 0) throw GradleException("failed: ${cmd.joinToString(" ")}")
+        }
+        for (abi in qjsAbis) {
+            val build = layout.buildDirectory.dir("qjs/build-$abi").get().asFile
+            run(cmake.path, "-S", file("src/main/qjs").path, "-B", build.path, *generator.toTypedArray(),
+                "-DCMAKE_TOOLCHAIN_FILE=${toolchain.path}",
+                "-DANDROID_ABI=$abi", "-DANDROID_PLATFORM=android-29", "-DCMAKE_BUILD_TYPE=Release")
+            run(cmake.path, "--build", build.path, "--target", "qjs_exe")
+            File(build, "out/libqjs.so").copyTo(qjsOut.get().dir(abi).file("libqjs.so").asFile, overwrite = true)
+        }
+    }
+}
+android.sourceSets.getByName("main").jniLibs.srcDir(qjsOut)
+tasks.named("preBuild") { dependsOn(buildQuickJs) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")

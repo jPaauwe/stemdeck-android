@@ -17,6 +17,9 @@
 #include "key.hpp"
 #include "librosa.hpp"
 #include "pipeline.hpp"
+#include "numpy.hpp"
+#include "sections.hpp"
+#include "vocal_split.hpp"
 #include "wav.hpp"
 
 using namespace sda;
@@ -139,6 +142,81 @@ int main(int argc, char** argv) {
             FILE* f = fopen(argv[7], "wb");
             fwrite(pcm.data(), 2, pcm.size(), f);
             fclose(f);
+        } else if (cmd == "madspec" && argc >= 4) {
+            // one 16-bit stem, or a comma-separated list mixed like desktop's amix
+            std::vector<std::string> paths;
+            for (char* t = std::strtok(argv[2], ","); t; t = std::strtok(nullptr, ",")) paths.push_back(t);
+            MadmomSignal sig = paths.size() == 1 ? madmom_load_stem(paths[0]) : madmom_load_mix(paths);
+            size_t frames = 0;
+            bool scaled = argc > 4 ? std::atoi(argv[4]) != 0 : sig.int16;
+            auto spec = madmom_logspec(sig, scaled, &frames);
+            write_f32(argv[3], spec.data(), spec.size());
+            std::fprintf(stderr, "%zu frames x %zu bins\n", frames, frames ? spec.size() / frames : 0);
+        } else if (cmd == "secfeat" && argc >= 4) {
+            size_t frames = 0;
+            auto f = section_features(argv[2], &frames);
+            write_f32(argv[3], f.data(), f.size());
+            std::fprintf(stderr, "4 x %zu x 81\n", frames);
+        } else if (cmd == "vsplit" && argc >= 6) {
+            // vocals.wav lead.wav backing.wav model.onnx [threads]
+            int threads = argc > 6 ? std::atoi(argv[6]) : 0;
+            auto t0 = std::chrono::steady_clock::now();
+            VocalSplitResult r = split_vocals(argv[2], argv[3], argv[4], argv[5], threads, nullptr);
+            double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            if (!r.ok) { std::fprintf(stderr, "no split: %s\n", r.why.c_str()); return 3; }
+            std::fprintf(stderr, "%.1f s of vocals split in %.1f s (model %.1f s)\n", r.seconds, secs, r.t_model);
+        } else if (cmd == "madfb" && argc >= 3) {
+            int bands = 0;
+            auto fb = madmom_filterbank(&bands);
+            write_f32(argv[2], fb.data(), fb.size());
+            std::fprintf(stderr, "1024 x %d\n", bands);
+        } else if (cmd == "secpost" && argc >= 10) {
+            // section.f32 function.f32 embedding.f64 frames beats.txt|- confidence duration out.json
+            SectionActivations a;
+            a.frames = (size_t)std::atol(argv[5]);
+            a.section_logits = read_floats(argv[2]);
+            a.function_logits = read_floats(argv[3]);
+            {
+                std::ifstream in(argv[4], std::ios::binary | std::ios::ate);
+                size_t n = (size_t)in.tellg() / 8;
+                in.seekg(0);
+                a.embedding.resize(n);
+                in.read((char*)a.embedding.data(), n * 8);
+            }
+            std::vector<double> beats;
+            if (std::string(argv[6]) != "-") beats = read_list(argv[6]);
+            auto raw = functional_segments(a);
+            auto refined = refine_segments(raw, a, beats, std::atof(argv[7]));
+            int count = 0;
+            std::string secs = normalize_sections(refined, std::atof(argv[8]), &count);
+            auto list = [](const std::vector<RawSegment>& v) {
+                std::string j = "[";
+                for (size_t i = 0; i < v.size(); i++)
+                    j += (i ? ", " : "") + std::string("{\"start\": ") + json_number(v[i].start) + ", \"end\": " +
+                         json_number(v[i].end) + ", \"label\": \"" + v[i].label + "\"}";
+                return j + "]";
+            };
+            write_text(argv[9], "{\"raw\": " + list(raw) + ", \"refined\": " + list(refined) + ", \"sections\": " + secs + "}");
+        } else if (cmd == "sections" && argc >= 8) {
+            // stems_dir models_dir beats.txt|- confidence duration out.json [threads]
+            std::vector<std::string> folds;
+            for (int f = 0; f < kSecFolds; f++) folds.push_back(std::string(argv[3]) + "/allinone_harmonix_fold" + std::to_string(f) + ".onnx");
+            std::vector<double> beats;
+            if (std::string(argv[4]) != "-") beats = read_list(argv[4]);
+            int threads = argc > 8 ? std::atoi(argv[8]) : 0;
+            SectionsResult r = run_sections(argv[2], folds, beats, std::atof(argv[5]), std::atof(argv[6]), threads, nullptr);
+            auto list = [](const std::vector<RawSegment>& v) {
+                std::string j = "[";
+                for (size_t i = 0; i < v.size(); i++)
+                    j += (i ? ", " : "") + std::string("{\"start\": ") + json_number(v[i].start) + ", \"end\": " +
+                         json_number(v[i].end) + ", \"label\": \"" + v[i].label + "\"}";
+                return j + "]";
+            };
+            char t[200];
+            std::snprintf(t, sizeof t, "\"t_spec\": %.3f, \"t_model\": %.3f, \"t_post\": %.3f", r.t_spec, r.t_model, r.t_post);
+            write_text(argv[7], "{\"ok\": " + std::string(r.ok ? "true" : "false") + ", \"why\": \"" + r.why + "\", \"raw\": " +
+                                    list(r.raw) + ", \"refined\": " + list(r.refined) + ", \"sections\": " + r.sections_json + ", " + t + "}");
+            std::fprintf(stderr, "%d sections; spectrogram %.2f s, model %.2f s, post %.3f s\n", r.count, r.t_spec, r.t_model, r.t_post);
         } else {
             std::fprintf(stderr, "bad arguments\n");
             return 2;

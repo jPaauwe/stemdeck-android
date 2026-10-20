@@ -14,6 +14,8 @@ import { PITCH_MAX, PITCH_MIN, clampPitch } from "../js/pitchBus.js";
 import { createPlaybackContext } from "../js/audioContext.js";
 // Android: the click track, desktop's own scheduler (static/js/metronome.js, unchanged).
 import { createMetronome, computeCountIn } from "../js/metronome.js";
+// Android: desktop's LRC reading (static/js/lyricsLookup.js, verbatim) for the Lyrics view.
+import { parseLrc, wordTimings, currentLineIndex, shiftLines, clampOffset } from "../js/lyricsLookup.js";
 // Per-stem label + color, keyed by the backend stem name. Unknown names fall
 // back to a rotating palette so non-standard models still render sensibly.
 const STEM_META = {
@@ -65,6 +67,8 @@ function ensureAudioCtx() {
 
 
 const ICON = {
+  // Android: Settings.
+  gear: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   chevron: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   dots: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
   prev: '<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6v12M19 6l-9 6 9 6z"/></svg>',
@@ -109,6 +113,11 @@ fetch("/api/settings").then((r) => r.json()).then((s) => {
     if (Number.isInteger(c.count_in)) state.click.countIn = c.count_in;
     applyClickSettings();
   }
+  // Android: as desktop's wireAutoSectionsToggle, a sections choice left on by
+  // an earlier session does not survive into this one.
+  if (s && s.auto_sections) saveAutoSections(false);
+  if (s && typeof s.lyrics_lookup === "boolean") state.lyricsLookup = s.lyrics_lookup;
+  if (s && typeof s.link_import === "boolean") state.linkImport = s.link_import;
   render();
 }).catch(() => {});
 // Android: which models the first song will download (the Extract screen says so).
@@ -146,7 +155,14 @@ const state = {
   // Android: the click track. `mult` (half/double time) is per song, as on desktop.
   click: { on: false, volume: 0.6, accent: -1, countIn: 0, mult: 1 },
   exportClick: false, // include the click in "Export mix" (opt-in, as on desktop)
-  models: null, // { separation, beat }: downloaded yet?
+  models: null, // { separation, beat, sections }: downloaded yet?
+  // Android: find song sections for the next import (desktop's auto_sections;
+  // off at every start and after each import, as on desktop).
+  autoSections: false,
+  loopSection: null, // Android: id of the section the transport loops, or null
+  lyricsLookup: false, // Android: Settings > Network, off until turned on
+  linkImport: false, // Android 1.4: Settings > Network, off until turned on
+  ytdlp: null, // Android 1.4: { yt_dlp, js_runtime, updated } for Settings
 };
 
 let extractES = null; // EventSource for the active extraction
@@ -297,6 +313,281 @@ function armCountIn(startPos) {
   return true;
 }
 
+// Android: the sections choice for the next import lives on the server, which
+// is what the job reads when it is created (desktop's auto_sections).
+function saveAutoSections(next) {
+  state.autoSections = next;
+  return fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ auto_sections: next }) })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((d) => { state.autoSections = !!d.auto_sections; })
+    .catch(() => { state.autoSections = !next; if (next) toast("Couldn't save that."); })
+    .finally(() => { if (state.tab === "extract") render(); });
+}
+
+// Android: desktop's section names (static/js/sections.js sectionDisplayName):
+// the kind's name, numbered when the song has more than one of that kind.
+const SECTION_NAMES = {
+  intro: "Intro", outro: "Outro", break: "Break", bridge: "Bridge", inst: "Instrumental",
+  solo: "Solo", verse: "Verse", chorus: "Chorus", part: "Part",
+};
+function sectionName(sec, all) {
+  const kind = String(sec?.kind || "").toLowerCase();
+  const name = SECTION_NAMES[kind];
+  if (!name) return String(sec?.name || "");
+  const peers = [...all].sort((a, b) => a.start - b.start).filter((x) => String(x?.kind || "").toLowerCase() === kind);
+  if (peers.length < 2) return name;
+  const pos = peers.findIndex((x) => x.id === sec.id);
+  return pos < 0 ? name : `${name} ${pos + 1}`;
+}
+
+function currentSections() {
+  const list = state.current?.detail?.sections;
+  return Array.isArray(list) && list.length ? list : null;
+}
+
+// Android: the song's sections as coloured blocks over the waveform. Tap one to
+// play from its start; hold one to loop it (hold it again to stop looping).
+function sectionStrip() {
+  const list = currentSections();
+  const dur = curDuration();
+  if (!list || !dur) return "";
+  return `<div class="sec-strip" data-sections>${[...list].sort((a, b) => a.start - b.start).map((x) => {
+    const left = (Math.max(0, x.start) / dur) * 100;
+    const width = (Math.max(0, Math.min(dur, x.end) - Math.max(0, x.start)) / dur) * 100;
+    const looped = state.loopSection === x.id;
+    return `<div class="sec-block${looped ? " looped" : ""}" data-sec="${esc(x.id)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;--sc:${esc(x.color || "#8391a5")}" role="button" aria-label="${esc(sectionName(x, list))}${looped ? ", looping" : ""}"><span>${looped ? "⟲ " : ""}${esc(sectionName(x, list))}</span></div>`;
+  }).join("")}</div>`;
+}
+
+function setSectionLoop(sec) {
+  if (!engine) return;
+  if (!sec || state.loopSection === sec.id) {
+    state.loopSection = null;
+    engine.setLoop(false, 0, 0);
+    toast("Loop off");
+  } else {
+    state.loopSection = sec.id;
+    engine.setLoop(true, sec.start, sec.end);
+    engine.seek(sec.start);
+    toast(`Looping ${sectionName(sec, currentSections() || [])}`);
+  }
+  render();
+}
+
+// ── Android: lyrics (LRCLIB, Settings > Network) ──
+// The kept version comes from GET /api/jobs/{id}/lyrics; the view highlights
+// the line being sung with desktop's parseLrc/wordTimings, wipes its words,
+// seeks on a tap, and keeps a timing offset (desktop's offset_sec).
+
+function lyricsState(data, status) {
+  const entry = status === 200 ? data : null;
+  const others = Array.isArray(data?.others) ? data.others : [];
+  const offset = clampOffset(entry?.offset_sec);
+  const lines = entry?.synced ? parseLrc(entry.synced) : [];
+  return { loading: false, entry, others, offset, lines, error: null, disabled: false };
+}
+
+function loadLyrics(id, token) {
+  state.current.lyrics = { loading: true, entry: null, others: [], lines: [], offset: 0 };
+  fetch(`/api/jobs/${id}/lyrics`, { cache: "no-store" })
+    .then(async (r) => ({ status: r.status, data: await r.json().catch(() => ({})) }))
+    .then(({ status, data }) => {
+      if (token !== engineToken || !state.current) return;
+      state.current.lyrics = lyricsState(data, status);
+      if (state.mixerView === "lyrics") render();
+    })
+    .catch(() => {
+      if (token !== engineToken || !state.current) return;
+      state.current.lyrics = { loading: false, entry: null, others: [], lines: [], offset: 0, error: "Couldn't load the lyrics." };
+    });
+}
+
+function lyricsQueryFields() {
+  const d = state.current?.detail || {};
+  const q = d.lyricsQuery || {};
+  const tags = d.audioTags || {};
+  let artist = q.artist ?? tags.artist ?? "";
+  let title = q.title ?? tags.title ?? "";
+  if (!title) {
+    const t = state.current?.title || "";
+    const m = /^(.+?)\s+[\p{Pd}]\s+(.+)$/u.exec(t);
+    if (m) { artist = artist || m[1]; title = m[2]; } else title = t;
+  }
+  return { artist, title };
+}
+
+async function lookUpLyrics(withFields) {
+  const c = state.current;
+  if (!c) return;
+  const body = {};
+  if (withFields) {
+    body.artist = (app.querySelector("[data-ly-artist]")?.value || "").trim();
+    body.title = (app.querySelector("[data-ly-title]")?.value || "").trim();
+    if (!body.title) { toast("Type the song's title first."); return; }
+    c.detail = { ...c.detail, lyricsQuery: { artist: body.artist, title: body.title } };
+  }
+  c.lyrics = { ...(c.lyrics || {}), loading: true, error: null };
+  render();
+  try {
+    const r = await fetch(`/api/jobs/${c.id}/lyrics/lookup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (state.current !== c) return;
+    if (r.status === 403) c.lyrics = { ...lyricsState({}, 404), disabled: true };
+    else if (r.status === 502) c.lyrics = { ...lyricsState({}, 404), error: "LRCLIB could not be reached. Try again later." };
+    else c.lyrics = lyricsState(data, r.status);
+  } catch (e) {
+    c.lyrics = { ...lyricsState({}, 404), error: "LRCLIB could not be reached. Try again later." };
+  }
+  render();
+}
+
+async function chooseLyrics(id) {
+  const c = state.current;
+  const r = await fetch(`/api/jobs/${c.id}/lyrics/choose`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lrclib_id: Number(id) }) });
+  const data = await r.json().catch(() => ({}));
+  if (state.current !== c) return;
+  if (r.ok) c.lyrics = lyricsState(data, 200);
+  else toast("Couldn't switch to that version.");
+  render();
+}
+
+let _lyricsOffsetTimer = null;
+function nudgeLyrics(delta) {
+  const ly = state.current?.lyrics;
+  if (!ly?.entry) return;
+  ly.offset = delta === 0 ? 0 : clampOffset(ly.offset + delta);
+  const off = app.querySelector(".ly-offset-val");
+  if (off) off.textContent = fmtOffset(ly.offset);
+  _lastLyricLine = -2;
+  paintLyrics(engine?.getCurrentTime?.() ?? 0);
+  clearTimeout(_lyricsOffsetTimer);
+  const id = state.current.id;
+  const value = ly.offset;
+  _lyricsOffsetTimer = setTimeout(() => {
+    fetch(`/api/jobs/${id}/lyrics/offset`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ offset_sec: value }) })
+      .catch(() => toast("Couldn't save the timing."));
+  }, 400);
+}
+
+const fmtOffset = (o) => `${o > 0 ? "+" : o < 0 ? "−" : ""}${Math.abs(o).toFixed(1)} s`;
+
+function shiftedLyricLines() {
+  const ly = state.current?.lyrics;
+  return ly?.lines?.length ? shiftLines(ly.lines, ly.offset || 0) : [];
+}
+
+let _lastLyricLine = -2;
+// Highlights the line being sung and wipes its words; scrolls it into view when it changes.
+function paintLyrics(t) {
+  if (state.mixerView !== "lyrics" || state.tab !== "mixer") return;
+  const lines = shiftedLyricLines();
+  if (!lines.length) return;
+  const i = currentLineIndex(lines, t);
+  const els = app.querySelectorAll(".ly-line");
+  if (i !== _lastLyricLine) {
+    els.forEach((el) => el.classList.toggle("cur", Number(el.dataset.ly) === i));
+    const el = i >= 0 ? app.querySelector(`.ly-line[data-ly="${i}"]`) : null;
+    if (el) el.scrollIntoView({ block: "center", behavior: _lastLyricLine === -2 ? "auto" : "smooth" });
+    _lastLyricLine = i;
+  }
+  if (i < 0) return;
+  const words = app.querySelectorAll(`.ly-line[data-ly="${i}"] .ly-w`);
+  if (!words.length) return;
+  const timing = wordTimings(lines[i], lines[i + 1]?.time ?? null);
+  words.forEach((w, k) => {
+    const wt = timing[k];
+    const p = !wt ? 1 : t <= wt.start ? 0 : t >= wt.end ? 1 : (t - wt.start) / (wt.end - wt.start);
+    w.style.setProperty("--p", (p * 100).toFixed(1) + "%");
+  });
+}
+
+function lyricLineHtml(line, i, next) {
+  const words = wordTimings(line, next?.time ?? null);
+  const inner = words.length ? words.map((w) => `<span class="ly-w">${esc(w.text)}</span>`).join("") : "&nbsp;";
+  return `<p class="ly-line" data-ly="${i}" data-action="ly-seek" data-time="${line.time}">${inner}</p>`;
+}
+
+function lyricsBody() {
+  const ly = state.current?.lyrics;
+  const notes = state.current?.detail?.notes || {};
+  const credit = `<div class="ly-credit">Lyrics from LRCLIB (lrclib.net), a free community database.</div>`;
+  if (!state.current) return "";
+  if (!ly || ly.loading) return `<div class="pad"><div class="lib-note">Looking for the lyrics…</div></div>`;
+  const e = ly.entry;
+  const othersHtml = ly.others?.length
+    ? `<div class="eyebrow">OTHER VERSIONS</div>${ly.others.map((o) =>
+      `<button class="ly-other" data-action="ly-choose" data-id="${esc(String(o.lrclib_id))}"><span>${esc(o.artist || "?")} – ${esc(o.track || "?")}</span><span class="ly-other-meta">${fmt(o.duration || 0)} · ${o.synced ? "synced" : o.instrumental ? "instrumental" : "text"}</span></button>`).join("")}`
+    : "";
+  if (e && ly.lines.length) {
+    const lines = shiftLines(ly.lines, 0);
+    const warn = e.timing === "unverified"
+      ? `<div class="ly-warn">This version is ${fmt(e.duration)} long, the song ${fmt(curDuration())}: the timing may be off. Use the offset to line it up.</div>` : "";
+    return `<div class="pad ly-pad">
+      ${warn}
+      <div class="ly-offset-label">Lyrics timing</div>
+      <div class="ly-offset"><button class="ly-btn" data-action="ly-nudge" data-d="-0.5">−0.5</button>
+        <button class="ly-btn" data-action="ly-nudge" data-d="-0.1">−0.1</button>
+        <span class="ly-offset-val">${fmtOffset(ly.offset || 0)}</span>
+        <button class="ly-btn" data-action="ly-nudge" data-d="0.1">+0.1</button>
+        <button class="ly-btn" data-action="ly-nudge" data-d="0.5">+0.5</button>
+        <button class="ly-btn" data-action="ly-nudge" data-d="0" aria-label="Reset the timing">↺</button></div>
+      <div class="ly-lines">${lines.map((l, i) => lyricLineHtml(l, i, lines[i + 1])).join("")}</div>
+      ${othersHtml}${credit}</div>`;
+  }
+  if (e && e.instrumental && !e.plain) return `<div class="pad ly-pad"><div class="lib-note">LRCLIB lists this song as instrumental.</div>${othersHtml}${credit}</div>`;
+  if (e && e.plain) {
+    return `<div class="pad ly-pad"><div class="ly-warn">These lyrics have no timing, so they don't follow the music.</div>
+      <pre class="ly-plain">${esc(e.plain)}</pre>${othersHtml}${credit}</div>`;
+  }
+  const q = lyricsQueryFields();
+  const off = ly.disabled || !state.lyricsLookup;
+  const why = ly.error || (off ? "" : notes.lyrics || "No lyrics yet for this song.");
+  return `<div class="pad ly-pad">
+    ${why ? `<div class="lib-note" style="margin-top:4px">${esc(why)}</div>` : ""}
+    ${off ? `<div class="ly-warn">Lyrics lookup is off. When on, it sends only the artist, title, album and length to lrclib.net.
+      <button class="cta sm ghost" data-action="tab" data-tab="settings" style="margin-top:10px">Open Settings</button></div>` : ""}
+    <div class="eyebrow">SEARCH</div>
+    <label class="ly-field"><span>Artist</span><input data-ly-artist type="text" autocomplete="off" value="${esc(q.artist)}"></label>
+    <label class="ly-field"><span>Title</span><input data-ly-title type="text" autocomplete="off" value="${esc(q.title)}"></label>
+    <button class="cta sm" data-action="ly-lookup" ${off ? "disabled style=opacity:.45" : ""}>Look up the lyrics</button>
+    ${othersHtml}${credit}</div>`;
+}
+
+// ── Android: Settings ──
+function settingsScreen() {
+  const row = (action, on, title, text) => `<button class="set-row" data-action="${action}" aria-pressed="${on}">
+      <span class="set-text"><span class="set-title">${title}</span><span class="set-sub">${text}</span></span>
+      <span class="set-switch${on ? " on" : ""}"><i></i></span></button>`;
+  return `<div class="screen scrl">
+    <div class="pad">
+      <div class="lib-head">
+        <span class="h1">Settings</span>
+        <button class="icon-btn" data-action="tab" data-tab="library" aria-label="Back to the Library">${ICON.chevron}</button>
+      </div>
+      <div class="eyebrow">NETWORK</div>
+      <div class="set-note">StemDeck separates and analyses on this phone. It downloads each model once, the first time a feature needs it, and nothing else goes online unless you turn it on here.</div>
+      ${row("set-lyrics", state.lyricsLookup, "Look up lyrics",
+        "For each new song, and when you search in the Lyrics tab, asks LRCLIB (lrclib.net). Only the artist, title, album and length are sent.")}
+      ${row("set-links", state.linkImport, "Import from links",
+        "Paste a YouTube or SoundCloud link on the Extract screen; yt-dlp downloads the audio on the phone. Those sites see the request like any visit. Only use audio you have the right to use: downloading from YouTube is against its terms of service.")}
+      ${state.linkImport ? `<div class="set-sub" style="margin:2px 0 10px">${state.ytdlp ? esc(state.ytdlp.error ? `yt-dlp could not start: ${state.ytdlp.error}` : `yt-dlp ${state.ytdlp.yt_dlp}${state.ytdlp.updated ? " (updated)" : ""}, ${state.ytdlp.js_runtime || "no JavaScript runtime found"}`) : "Checking yt-dlp…"}</div>
+        <button class="cta sm ghost" data-action="ytdlp-update">Update yt-dlp</button>` : ""}
+    </div>
+  </div>`;
+}
+
+function refreshYtdlp() {
+  fetch("/api/ytdlp").then((r) => r.json()).then((d) => { state.ytdlp = d; if (state.tab === "settings") render(); }).catch(() => {});
+}
+
+function saveSetting(body, apply) {
+  return fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then(apply)
+    .catch(() => toast("Couldn't save that."))
+    .finally(() => render());
+}
+
 // Beats and bar starts as a strip under the waveform (detected grid).
 function beatStrip() {
   const g = currentGrid();
@@ -407,6 +698,7 @@ function onEngineTime(t) {
   if (head) head.style.left = state.progress * 100 + "%";
   if (cur) cur.textContent = fmt(t);
   paintWaveProgress();
+  paintLyrics(t); // Android
 }
 
 // Load a track: fetch detail, build lanes, spin up the Web Audio engine.
@@ -425,6 +717,8 @@ async function openTrack(card, { autoplay = false } = {}) {
   const token = ++engineToken;
   pendingPlay = autoplay;
   state.click.mult = 1; // Android: half/double time is per song, as on desktop
+  state.loopSection = null; // Android: a new song starts without a loop
+  loadLyrics(card.id, token); // Android
 
   // Android: the click track's beat grid, alongside the detail (404 when the
   // song has none, e.g. separated before 1.1).
@@ -478,6 +772,9 @@ async function openTrack(card, { autoplay = false } = {}) {
     hasVideo: !!detail.has_video,
     analysis: extractAnalysis(detail, laneList),
     notes: detail.analysis_notes || {}, // Android: why the beat grid or key is missing
+    sections: Array.isArray(detail.sections) ? detail.sections : null, // Android: automatic sections
+    audioTags: detail.audio_tags || {}, // Android: for the lyrics search
+    lyricsQuery: detail.lyrics_query || null,
   };
   state.current.loading = false;
   state.current.stemCount = laneList.length;
@@ -696,7 +993,8 @@ function analysisBody() {
   } else if (notes.beats) {
     gridHtml = `<div class="eyebrow">BEAT GRID</div><div class="grid-info"><div class="gi-sub">${esc(notes.beats)}</div></div>`;
   }
-  const keyNote = notes.key ? `<div class="grid-info" style="margin-top:8px"><div class="gi-sub">${esc(notes.key)}</div></div>` : "";
+  const keyNote = (notes.key ? `<div class="grid-info" style="margin-top:8px"><div class="gi-sub">${esc(notes.key)}</div></div>` : "") +
+    (notes.sections ? `<div class="grid-info" style="margin-top:8px"><div class="gi-sub">${esc(notes.sections)}</div></div>` : "");
   const clickOpt = g
     ? `<button class="check-row" data-action="export-click" aria-pressed="${state.exportClick}"><span class="check${state.exportClick ? " on" : ""}">${state.exportClick ? ICON.check : ""}</span>Include the click track</button>`
     : "";
@@ -738,7 +1036,7 @@ function mixerScreen() {
   const sourceTag = c.sub || "—";
   const stemTag = c.stemCount ? `${c.stemCount} stems` : "";
   const dur = curDuration();
-  const body = state.mixerView === "stems" ? stemsBody() : analysisBody();
+  const body = state.mixerView === "stems" ? stemsBody() : state.mixerView === "lyrics" ? lyricsBody() : analysisBody();
   const ready = engineReady && engineTrackId === state.current?.id;
   const preparing = !!state.current && !state.current.loading && !state.current.error && !ready;
   const canPlay = ready;
@@ -760,6 +1058,7 @@ function mixerScreen() {
         <div class="tags"><span class="tag">${esc(sourceTag)}</span>${stemTag ? `<span class="tag">${stemTag}</span>` : ""}</div>
       </div>
       <div class="wave">
+        ${sectionStrip() /* Android */}
         <div class="wave-bars" data-seek>${mainWaveform()}<div class="playhead" style="left:${state.progress * 100}%"></div></div>
         ${beatStrip() /* Android */}
         <div class="wave-times"><span class="cur">${fmt(state.progress * dur)}</span><span class="dur">${fmt(dur)}</span></div>
@@ -780,6 +1079,7 @@ function mixerScreen() {
       <div class="segmented">
         <button class="${state.mixerView === "stems" ? "on" : ""}" data-action="mixview" data-view="stems">Stems</button>
         <button class="${state.mixerView === "analysis" ? "on" : ""}" data-action="mixview" data-view="analysis">Analysis</button>
+        <button class="${state.mixerView === "lyrics" ? "on" : ""}" data-action="mixview" data-view="lyrics">Lyrics</button>
       </div>
     </div>
     ${body}
@@ -830,7 +1130,7 @@ function libraryScreen() {
     <div class="pad">
       <div class="lib-head">
         <span class="h1">Library</span>
-        <div class="avatar">JS</div>
+        <button class="icon-btn" data-action="tab" data-tab="settings" aria-label="Settings">${ICON.gear}</button>
       </div>
       <div class="search">${ICON.search}<span>Search your library</span></div>
       <div class="filters scrl">${FILTERS.map((f) => `<span class="filter ${f === state.filter ? "on" : ""}" data-action="filter" data-filter="${f}">${f}</span>`).join("")}</div>
@@ -868,7 +1168,8 @@ function extractScreen() {
   return `<div class="screen scrl">
     <div class="pad">
       <div class="h1">Extract stems</div>
-      <div class="sub">Upload audio to split it into stems on this phone.</div>
+      <div class="sub">${state.linkImport ? "Paste a link or upload audio to split it into stems on this phone." : "Upload audio to split it into stems on this phone."}</div>
+      ${state.linkImport ? `<div class="paste">${ICON.link}<input id="ext-url" class="ext-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste a YouTube or SoundCloud link" value="${esc(state.extractUrl || "")}"></div>` : ""}
       <button class="upload" data-action="pick-file">${ICON.upload}${fileName ? esc(fileName) : "Upload audio file"}</button>
       <input id="ext-file" type="file" accept="audio/*,video/mp4,.mp3,.wav,.flac,.m4a,.ogg,.opus" style="display:none">
       <div class="eyebrow">STEMS TO EXTRACT</div>
@@ -877,7 +1178,13 @@ function extractScreen() {
         const onStyle = on ? `border-color:${s.color};background:${s.color}1c;` : "";
         return `<button class="chip-btn ${on ? "on" : ""}" style="${onStyle}" data-action="chip" data-id="${s.id}"><div class="dot" style="background:${s.color}"></div><span class="nm">${s.name}</span>${on ? ICON.check : ""}</button>`;
       }).join("")}</div>
-      <!-- Android: no lead/backing vocal split on the phone yet. -->
+      <div class="vocal-mode-row">
+        <span class="vocal-mode-label">Vocals</span>
+        <div class="segmented sm">
+          <button class="${state.selected.vocals && state.vocalSplitMode !== "split" ? "on" : ""}" data-action="vocalmode" data-mode="all">Combined</button>
+          <button class="${state.selected.vocals && state.vocalSplitMode === "split" ? "on" : ""}" data-action="vocalmode" data-mode="split">Lead + Backing</button>
+        </div>
+      </div>
       <!-- Android: the file format for stems and mix exports, remembered by the app. -->
       <div class="eyebrow">FILE FORMAT</div>
       <div class="chips">${STEM_FORMATS.map((f) => {
@@ -889,6 +1196,8 @@ function extractScreen() {
         const on = state.processor === f.id;
         return `<button class="chip-btn ${on ? "on" : ""}" style="${on ? "border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.06);" : ""}" data-action="processor" data-id="${f.id}"><span class="nm">${f.name}<br><span style="font-size:11.5px;font-weight:500;color:var(--muted)">${f.note}</span></span>${on ? ICON.check : ""}</button>`;
       }).join("")}</div>
+      <div class="eyebrow">SONG SECTIONS</div>
+      <button class="check-row" data-action="auto-sections" aria-pressed="${state.autoSections}"><span class="check${state.autoSections ? " on" : ""}">${state.autoSections ? ICON.check : ""}</span>Find the sections (intro, verse, chorus…)</button>
       <button class="cta" style="margin-top:22px" data-action="split">${ICON.scissors}Extract stems</button>
       ${modelNote() /* Android */}
       ${extractProgressCard()}
@@ -907,6 +1216,8 @@ function modelNote() {
   const need = [];
   if (!m.separation) need.push("the separation model (55 MB)");
   if (!m.beat) need.push("the beat model for the click track (82 MB)");
+  if (state.autoSections && !m.sections) need.push("the section model (25 MB)");
+  if (state.selected.vocals && state.vocalSplitMode === "split" && !m.vocal_split) need.push("the vocal split model (53 MB)");
   if (!need.length) return "";
   return `<div class="model-note">The first song downloads ${need.join(" and ")}, once.</div>`;
 }
@@ -917,7 +1228,7 @@ async function startExtraction() {
   if (!stems.length) { toast("Pick at least one stem."); return; }
   const file = state.extractFile;
   const url = (state.extractUrl || "").trim();
-  if (!file && !url) { toast("Choose an audio file first."); return; }
+  if (!file && !url) { toast(state.linkImport ? "Paste a link or choose a file first." : "Choose an audio file first."); return; }
 
   let init, title;
   if (file) {
@@ -932,7 +1243,7 @@ async function startExtraction() {
     title = url;
   }
 
-  const vocalSplitMode = "all"; // Android: no lead/backing split yet
+  const vocalSplitMode = state.selected.vocals ? state.vocalSplitMode : "all";
   state.extractJob = { id: null, title, status: "queued", progress: 0, stage: "Queued", vocalSplitMode };
   render();
 
@@ -951,6 +1262,7 @@ async function startExtraction() {
   }
 
   state.extractJob.id = jobId;
+  if (state.autoSections) saveAutoSections(false); // Android: the choice was for this import (desktop resets it too)
   state.extractFile = null;
   state.extractUrl = "";
   state.vocalSplitMode = "all";
@@ -1058,6 +1370,7 @@ function render() {
   let screen = mixerScreen();
   if (state.tab === "library") screen = libraryScreen();
   else if (state.tab === "extract") screen = extractScreen();
+  else if (state.tab === "settings") screen = settingsScreen(); // Android
   const mini = miniPlayer();
   // Android: the screens leave room for the mini player too while it shows,
   // so it does not cover the last item (e.g. the Extract stems button).
@@ -1066,6 +1379,10 @@ function render() {
   _lastPlayedBar = -1; // bars were just rebuilt; force a repaint on next tick
   wireFaders();
   wireSwipe();
+  if (state.tab === "mixer" && state.mixerView === "lyrics") { // Android
+    _lastLyricLine = -2;
+    paintLyrics(engine?.getCurrentTime?.() ?? 0);
+  }
 }
 
 // Suppresses the synthetic click that follows a swipe gesture, so swiping a
@@ -1182,6 +1499,37 @@ async function deleteTrack(id) {
 // Faders + waveform seek need live pointer drag, so they're wired imperatively
 // after each render (the rest of the UI uses click delegation below).
 function wireFaders() {
+  // Android: section blocks. A tap plays from the section's start; holding
+  // one for half a second loops it (and holding it again stops the loop).
+  app.querySelectorAll("[data-sec]").forEach((el) => {
+    el.addEventListener("pointerdown", (e) => {
+      const list = currentSections();
+      const sec = list && list.find((x) => x.id === el.dataset.sec);
+      if (!sec || !engine) return;
+      e.preventDefault();
+      const x0 = e.clientX, y0 = e.clientY;
+      let held = false, gone = false;
+      const timer = setTimeout(() => { held = true; navigator.vibrate?.(15); setSectionLoop(sec); }, 500);
+      const mv = (ev) => { if (Math.abs(ev.clientX - x0) > 10 || Math.abs(ev.clientY - y0) > 10) { gone = true; clearTimeout(timer); } };
+      const up = () => {
+        clearTimeout(timer);
+        el.removeEventListener("pointermove", mv);
+        el.removeEventListener("pointerup", up);
+        el.removeEventListener("pointercancel", up);
+        if (held || gone) return;
+        const dur = curDuration();
+        // Outside a looped section the loop would pull playback straight back.
+        if (state.loopSection && state.loopSection !== sec.id) { state.loopSection = null; engine.setLoop(false, 0, 0); }
+        engine.seek(sec.start);
+        onEngineTime(sec.start);
+        if (dur) render();
+      };
+      el.addEventListener("pointermove", mv);
+      el.addEventListener("pointerup", up);
+      el.addEventListener("pointercancel", up);
+    });
+  });
+
   app.querySelectorAll("[data-fader]").forEach((el) => {
     el.addEventListener("pointerdown", (e) => {
       e.preventDefault();
@@ -1305,9 +1653,11 @@ app.addEventListener("click", (e) => {
       return;
     case "tab":
       state.tab = t.dataset.tab;
+      if (state.tab === "settings" && state.linkImport && !state.ytdlp) refreshYtdlp(); // Android 1.4
       break;
     case "mixview":
       state.mixerView = t.dataset.view;
+      _lastLyricLine = -2; // Android: scroll to the current line when the Lyrics view opens
       break;
     case "prev":
       prevTrack();
@@ -1327,6 +1677,33 @@ app.addEventListener("click", (e) => {
     case "solo":
       state.solo[t.dataset.id] = !state.solo[t.dataset.id];
       applyMix();
+      break;
+    case "set-links": // Android 1.4
+      saveSetting({ link_import: !state.linkImport }, (d) => { state.linkImport = !!d.link_import; if (state.linkImport) refreshYtdlp(); });
+      return;
+    case "ytdlp-update": // Android 1.4
+      toast("Updating yt-dlp…");
+      fetch("/api/ytdlp/update", { method: "POST" }).then((r) => r.json()).then((d) => toast(d.detail || "Done.")).catch(() => toast("Couldn't update yt-dlp."));
+      return;
+    case "set-lyrics": // Android
+      saveSetting({ lyrics_lookup: !state.lyricsLookup }, (d) => { state.lyricsLookup = !!d.lyrics_lookup; });
+      return;
+    case "ly-lookup": // Android
+      lookUpLyrics(true);
+      return;
+    case "ly-choose": // Android
+      chooseLyrics(t.dataset.id);
+      return;
+    case "ly-nudge": // Android
+      nudgeLyrics(Number(t.dataset.d));
+      return;
+    case "ly-seek": { // Android: a tap on a line plays from it
+      const time = Number(t.dataset.time) + (state.current?.lyrics?.offset || 0);
+      if (engine && Number.isFinite(time)) { engine.seek(Math.max(0, time)); onEngineTime(Math.max(0, time)); }
+      return;
+    }
+    case "auto-sections": // Android
+      saveAutoSections(!state.autoSections);
       break;
     case "click-toggle": // Android
       state.click.on = !state.click.on;
